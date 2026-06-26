@@ -4,10 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { DriveCandidate, WatchStatus, WatchTrack } from "./types";
+import { fallbackBytesForModel, resolveWatchModel } from "./watchModels";
 
 const execFileAsync = promisify(execFile);
 const COROS_NAME_PATTERN = /(coros|pace|apex|vertix)/i;
-const PACE_PRO_BYTES = 32 * 1024 * 1024 * 1024;
 
 interface RawVolume {
   name: string;
@@ -39,10 +39,14 @@ export async function getWatchStatus(): Promise<WatchStatus> {
       selected.musicPath ?? path.join(selected.rootPath, "Music");
     const tracks = fs.existsSync(musicPath) ? listWatchTracks(musicPath) : [];
 
+    const model =
+      resolveWatchModel(selected.name, selected.totalBytes) ?? "pace-pro";
+
     return {
       connected: true,
       checkedAt: new Date().toISOString(),
       name: selected.name,
+      model,
       rootPath: selected.rootPath,
       musicPath,
       totalBytes: selected.totalBytes,
@@ -78,7 +82,7 @@ export async function deleteWatchTrack(relativePath: string): Promise<void> {
 
 export async function transferFileToWatch(filePath: string): Promise<WatchTrack> {
   if (!filePath.toLowerCase().endsWith(".mp3")) {
-    throw new Error("COROS Pace Pro only supports MP3 files.");
+    throw new Error("COROS watches only support MP3 files.");
   }
 
   if (!fs.existsSync(filePath)) {
@@ -121,7 +125,7 @@ async function findDriveCandidates(): Promise<DriveCandidate[]> {
       continue;
     }
 
-    const storage = getStorageStats(volume.rootPath);
+    const storage = getStorageStats(volume.rootPath, volume.name);
     candidates.push({
       name: volume.name,
       rootPath: volume.rootPath,
@@ -255,7 +259,7 @@ function listWatchTracks(musicPath: string): WatchTrack[] {
   return tracks.sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function getStorageStats(rootPath: string): StorageStats {
+function getStorageStats(rootPath: string, volumeName: string): StorageStats {
   try {
     const stats = fs.statfsSync(rootPath);
     const totalBytes = stats.blocks * stats.bsize;
@@ -266,8 +270,9 @@ function getStorageStats(rootPath: string): StorageStats {
       usedBytes: totalBytes - freeBytes
     };
   } catch {
+    const model = resolveWatchModel(volumeName);
     return {
-      totalBytes: PACE_PRO_BYTES
+      totalBytes: fallbackBytesForModel(model)
     };
   }
 }

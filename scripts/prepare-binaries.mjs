@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 const require = createRequire(import.meta.url);
 const gunzipAsync = promisify(gunzip);
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const userAgent = "coros-desktop-app";
+const userAgent = "coroslink";
 const PINNED_YT_DLP_VERSION = "2026.06.09";
 
 const options = parseArgs(process.argv.slice(2));

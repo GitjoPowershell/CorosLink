@@ -56,12 +56,11 @@ import { recentTrainingHubDateList } from "./training/formatters";
 import { TrainingHubView } from "./training/TrainingHubView";
 import type { TrainingHubSnapshot } from "./training/types";
 import type { CorosLinkApi } from "./coroslink-api";
-import paceProHero from "../public/assets/pace-pro-hero.webp";
+import { getWatchPresentation } from "./watchModels";
 
 type View = "overview" | "media" | "training";
 type MediaTab = "library" | "youtube" | "spotify";
 
-const PACE_PRO_BYTES = 32 * 1024 * 1024 * 1024;
 const YOUTUBE_HOME_URL = "https://www.youtube.com/";
 const YOUTUBE_DOWNLOAD_CONSOLE_PREFIX = "__COROSLINK_YOUTUBE_DOWNLOAD__";
 
@@ -343,13 +342,15 @@ export default function App() {
         (total, track) => total + track.sizeBytes,
         0,
       ) ?? 0;
-    const totalBytes = watchStatus?.totalBytes ?? PACE_PRO_BYTES;
+    const presentation = getWatchPresentation(watchStatus);
+    const totalBytes = watchStatus?.totalBytes ?? presentation.fallbackBytes;
     const usedBytes = watchStatus?.usedBytes ?? trackBytes;
     return {
       totalBytes,
       usedBytes,
       freeBytes: watchStatus?.freeBytes,
       percent: Math.min(100, Math.round((usedBytes / totalBytes) * 100)),
+      capacityLabel: presentation.capacityLabel,
     };
   }, [watchStatus]);
 
@@ -1246,6 +1247,7 @@ interface MediaOverviewTabProps {
     usedBytes: number;
     freeBytes?: number;
     percent: number;
+    capacityLabel: string;
   };
   watchConnected: boolean;
   busy: string | null;
@@ -1297,13 +1299,14 @@ function MediaOverviewTab({
     () => downloads.reduce((total, track) => total + track.sizeBytes, 0),
     [downloads],
   );
+  const watchPresentation = getWatchPresentation(watchStatus);
 
   return (
     <div className="dashboard">
       <header className="dashboard-welcome dashboard-block">
         <div>
           <h1 className="dashboard-greeting">{getTimeOfDayGreeting()}</h1>
-          <p className="dashboard-subtitle">Your Pace Pro companion</p>
+          <p className="dashboard-subtitle">{watchPresentation.companion}</p>
         </div>
         <button
           className="icon-button"
@@ -1323,8 +1326,8 @@ function MediaOverviewTab({
       <div className="dashboard-hero-row dashboard-block">
         <section className="dashboard-hero panel">
           <img
-            src={paceProHero}
-            alt="COROS Pace Pro"
+            src={watchPresentation.heroImage}
+            alt={watchPresentation.heroAlt}
             className="dashboard-hero-image"
           />
         </section>
@@ -1332,7 +1335,7 @@ function MediaOverviewTab({
         <section className="dashboard-status panel">
           <div className="dashboard-status-header">
             <div>
-              <p className="eyebrow">COROS Pace Pro</p>
+              <p className="eyebrow">{watchPresentation.displayName}</p>
               <h2>
                 {watchConnected
                   ? (watchStatus?.name ?? "Connected")
@@ -1357,13 +1360,11 @@ function MediaOverviewTab({
             {formatBytes(storage.totalBytes)}
             {storage.freeBytes !== undefined
               ? ` · ${formatBytes(storage.freeBytes)} free`
-              : " · 32 GB capacity"}
+              : ` · ${formatBytes(storage.totalBytes)} capacity`}
           </p>
 
           {!watchConnected ? (
-            <p className="connect-hint">
-              Connect your Pace Pro via USB to sync music
-            </p>
+            <p className="connect-hint">{watchPresentation.connectHint}</p>
           ) : null}
         </section>
       </div>
@@ -2510,6 +2511,7 @@ interface WatchViewProps {
     usedBytes: number;
     freeBytes?: number;
     percent: number;
+    capacityLabel: string;
   };
   busy: string | null;
   onDeleteWatchTrack: (track: LocalTrackLike) => void;
@@ -2549,7 +2551,7 @@ function WatchView({
           <span>
             {storage.freeBytes !== undefined
               ? `${formatBytes(storage.freeBytes)} free`
-              : "32 GB Pace Pro capacity fallback"}
+              : storage.capacityLabel}
           </span>
         </div>
       </section>

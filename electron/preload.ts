@@ -148,6 +148,6 @@ const api = {
     ipcRenderer.invoke("trainingHub:getSportTypeMap")
 };
 
-contextBridge.exposeInMainWorld("coros", api);
+contextBridge.exposeInMainWorld("corosLink", api);
 
-export type CorosApi = typeof api;
+export type CorosLinkApi = typeof api;

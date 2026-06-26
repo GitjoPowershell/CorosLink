@@ -1,11 +1,15 @@
 <p align="center">
-  <img src="build/icon.png" alt="COROS Desktop" width="128" />
+  <img src="build/icon.png" alt="CorosLink" width="128" />
 </p>
 
-<h1 align="center">COROS Desktop</h1>
+<h1 align="center">CorosLink</h1>
 
 <p align="center">
   <em>Your Pace Pro companion — media, watch sync, and training analytics in one desktop app.</em>
+</p>
+
+<p align="center">
+  <strong>Live site:</strong> <a href="https://junakerbuilds.github.io/CorosLink/">junakerbuilds.github.io/CorosLink</a>
 </p>
 
 <p align="center">
@@ -28,7 +32,7 @@
 
 ## Overview
 
-COROS Desktop brings music management and training analytics together for your **COROS Pace Pro**. Connect your watch over USB, download MP3s from YouTube or Spotify playlists, transfer tracks in one click, and explore your training data in a rich dashboard — all from your Mac or PC.
+CorosLink brings music management and training analytics together for your **COROS Pace Pro**. Connect your watch over USB, download MP3s from YouTube or Spotify playlists, transfer tracks in one click, and explore your training data in a rich dashboard — all from your Mac or PC.
 
 ---
 
@@ -116,7 +120,7 @@ Log in with your COROS account to view training data, fitness scores, and race p
 
 ## How it works
 
-COROS Desktop uses two independent data paths — USB for music, COROS APIs for training.
+CorosLink uses two independent data paths — USB for music, COROS APIs for training.
 
 ```mermaid
 flowchart LR
@@ -143,10 +147,22 @@ Get the latest installer from **[GitHub Releases](https://github.com/JunAkerBuil
 
 | Platform | File |
 | -------- | ---- |
-| macOS (Apple Silicon) | `COROS Desktop-*-arm64.dmg` |
-| Windows | `COROS Desktop Setup *.exe` |
+| macOS (Apple Silicon) | `CorosLink-*-arm64.dmg` |
+| Windows | `CorosLink Setup *.exe` |
 
-macOS builds are unsigned — right-click the app → **Open** the first time. Windows may show a SmartScreen prompt for unsigned installers.
+#### macOS: “app is damaged” or won’t open
+
+The app is **not** corrupted. macOS blocks unsigned apps downloaded from the internet. Fix it after installing:
+
+```sh
+xattr -cr "/Applications/CorosLink.app"
+```
+
+Then open normally. If that still fails, right-click the app → **Open** → **Open** again.
+
+> Builds are unsigned (no Apple Developer certificate). A future signed release would skip this step.
+
+Windows may show a SmartScreen prompt for unsigned installers — click **More info** → **Run anyway**.
 
 ### Build from source
 
@@ -272,5 +288,5 @@ Pushes to `main` run [Build desktop installers](.github/workflows/build.yml) and
 ---
 
 <p align="center">
-  Built with Electron, React, and Vite · COROS Desktop Contributors
+  Built with Electron, React, and Vite · CorosLink Contributors
 </p>

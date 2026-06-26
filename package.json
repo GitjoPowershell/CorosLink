@@ -1,9 +1,9 @@
 {
-  "name": "coros-desktop-app",
-  "version": "0.1.0",
+  "name": "coroslink",
+  "version": "0.1.1",
   "private": true,
-  "description": "Unofficial COROS desktop music manager built with Electron, React, and Vite.",
-  "author": "COROS Desktop Contributors",
+  "description": "Unofficial COROS Pace Pro companion — media, watch sync, and training analytics.",
+  "author": "CorosLink Contributors",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
@@ -20,11 +20,13 @@
     "rebuild": "electron-builder install-app-deps",
     "dist": "npm run binaries:prepare && npm run build && electron-builder --publish never",
     "dist:mac": "npm run binaries:prepare && npm run build && electron-builder --mac dmg --publish never",
-    "dist:win": "npm run binaries:prepare:win && npm run build && electron-builder --win nsis --x64 --publish never"
+    "dist:win": "npm run binaries:prepare:win && npm run build && electron-builder --win nsis --x64 --publish never",
+    "website:dev": "npm run dev --prefix website",
+    "website:build": "cross-env GITHUB_PAGES=true npm run build --prefix website"
   },
   "build": {
-    "appId": "app.coros.desktop",
-    "productName": "COROS Desktop",
+    "appId": "app.coroslink",
+    "productName": "CorosLink",
     "publish": null,
     "icon": "build/icon.png",
     "afterPack": "scripts/after-pack.cjs",
@@ -51,7 +53,8 @@
     "mac": {
       "target": "dmg",
       "category": "public.app-category.music",
-      "icon": "build/icon.icns"
+      "icon": "build/icon.icns",
+      "identity": "-"
     },
     "win": {
       "target": "nsis",

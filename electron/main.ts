@@ -86,7 +86,7 @@ function createWindow(): void {
     height: 760,
     minWidth: 900,
     minHeight: 640,
-    title: "COROS Desktop",
+    title: "CorosLink",
     ...(iconPath ? { icon: iconPath } : {}),
     backgroundColor: "#0b0f0e",
     webPreferences: {

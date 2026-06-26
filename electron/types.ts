@@ -32,10 +32,13 @@ export interface WatchTrack {
   modifiedAt: string;
 }
 
+export type WatchModelId = "pace-pro" | "pace-4";
+
 export interface WatchStatus {
   connected: boolean;
   checkedAt: string;
   name?: string;
+  model?: WatchModelId;
   rootPath?: string;
   musicPath?: string;
   totalBytes?: number;
