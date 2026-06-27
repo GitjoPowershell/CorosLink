@@ -1,14 +1,16 @@
-import { dirname } from "node:path";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const websiteRoot = dirname(fileURLToPath(import.meta.url));
+const websiteRoot = path.dirname(fileURLToPath(import.meta.url));
+const monorepoRoot = path.resolve(websiteRoot, "..");
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
+  outputFileTracingRoot: monorepoRoot,
   turbopack: {
-    root: websiteRoot,
+    root: monorepoRoot,
   },
 };
 
