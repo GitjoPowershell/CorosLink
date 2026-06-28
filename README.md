@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-2d9a74?style=flat-square" alt="Platform" />
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-2d9a74?style=flat-square" alt="Platform" />
   <img src="https://img.shields.io/badge/Electron-42-47848F?style=flat-square&logo=electron&logoColor=white" alt="Electron" />
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React" />
   <img src="https://img.shields.io/badge/TypeScript-6-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
@@ -38,7 +38,7 @@
 
 ## Overview
 
-CorosLink brings music management and training analytics together for your **COROS Pace Pro**. Connect your watch over USB, download MP3s from YouTube or Spotify playlists, transfer tracks in one click, and explore your training data in a rich dashboard — all from your Mac or PC.
+CorosLink brings music management and training analytics together for your **COROS Pace Pro**. Connect your watch over USB, download MP3s from YouTube or Spotify playlists, transfer tracks in one click, and explore your training data in a rich dashboard — all from your Mac, PC, or Linux desktop.
 
 ---
 
@@ -155,6 +155,7 @@ Get the latest installer from **[GitHub Releases](https://github.com/JunAkerBuil
 | -------- | ---- |
 | macOS (Apple Silicon) | `CorosLink-*-arm64.dmg` |
 | Windows | `CorosLink Setup *.exe` |
+| Linux (x64) | `CorosLink-*-x86_64.AppImage` |
 
 #### macOS: “app is damaged” or won’t open
 
@@ -170,6 +171,14 @@ Then open normally. If that still fails, right-click the app → **Open** → **
 
 Windows may show a SmartScreen prompt for unsigned installers — click **More info** → **Run anyway**.
 
+On Linux, download the AppImage, mark it executable (`chmod +x CorosLink-*.AppImage`), then run it. Most desktop environments can also open AppImages directly from the file manager.
+
+### In-app updates
+
+Packaged builds check **[GitHub Releases](https://github.com/JunAkerBuilds/CorosLink/releases)** for new versions on launch. When an update is available, CorosLink downloads it in the background and shows **Restart to update** in the header. You can also click the version badge to check manually.
+
+> **macOS note:** Auto-update works best with signed builds. Unsigned installs may still need a manual download from GitHub Releases until code signing is set up.
+
 ### Build from source
 
 ```sh
@@ -179,13 +188,14 @@ npm install
 npm run rebuild
 npm run dist:mac    # macOS DMG (run on macOS)
 npm run dist:win    # Windows NSIS installer (run on Windows)
+npm run dist:linux  # Linux AppImage (run on Linux)
 ```
 
 Installers are written to `release/`.
 
 ### Requirements
 
-- **macOS** or **Windows**
+- **macOS**, **Windows**, or **Linux**
 - **USB cable** to connect your Pace Pro for music sync
 - **yt-dlp** and **ffmpeg** — bundled in packaged builds; falls back to `PATH` if missing
 - **Spotify Developer app** (optional) — only needed for Spotify playlist sync
@@ -222,6 +232,12 @@ To prepare Windows x64 media binaries from any platform:
 
 ```sh
 npm run binaries:prepare:win
+```
+
+To prepare Linux x64 media binaries from any platform:
+
+```sh
+npm run binaries:prepare:linux
 ```
 
 For hardware-free watch detection checks, set `COROS_WATCH_PATH=/path/to/mock-watch` with a `Music` folder, or run:
@@ -268,6 +284,7 @@ Convenience target scripts:
 ```sh
 npm run dist:mac
 npm run dist:win
+npm run dist:linux
 ```
 
 For a quick local packaging layout check without code signing:
@@ -276,7 +293,7 @@ For a quick local packaging layout check without code signing:
 CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist -- --dir
 ```
 
-Because `better-sqlite3` is native, build Windows installers on Windows or in CI where Electron native dependencies can be rebuilt for the Windows target.
+Because `better-sqlite3` is native, build Windows installers on Windows or in CI where Electron native dependencies can be rebuilt for the Windows target. The same applies to Linux AppImages on Linux.
 
 **Publishing a release (maintainers):**
 
@@ -289,7 +306,7 @@ git tag v0.1.5
 git push origin main v0.1.5
 ```
 
-2. That triggers the [Release installers](.github/workflows/release.yml) workflow. CI syncs the tag into `package.json` before building, then verifies the versions match, so installer names like `CorosLink-0.1.5-arm64.dmg` always follow the git tag.
+2. That triggers the [Release installers](.github/workflows/release.yml) workflow. CI syncs the tag into `package.json` before building, then verifies the versions match, so installer names like `CorosLink-0.1.5-arm64.dmg` always follow the git tag. The workflow also uploads `latest-mac.yml`, `latest-linux.yml`, and `latest.yml` plus blockmaps so packaged apps can auto-update via `electron-updater`.
 
 You can also run the workflow manually from **Actions → Release installers** (it uses the current `package.json` version when no tag is pushed).
 

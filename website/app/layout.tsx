@@ -5,7 +5,7 @@ import "../src/styles/global.css";
 
 const SITE_URL = "https://coroslink.vercel.app";
 const DESCRIPTION =
-  "CorosLink is an unofficial COROS Pace Pro companion for music sync, USB watch transfer, and training analytics on macOS and Windows.";
+  "CorosLink is an unofficial COROS Pace Pro companion for music sync, USB watch transfer, and training analytics on macOS, Windows, and Linux.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

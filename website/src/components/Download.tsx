@@ -9,6 +9,7 @@ const API_URL = "https://api.github.com/repos/JunAkerBuilds/CorosLink/releases/l
 interface ReleaseAssets {
   macUrl: string | null;
   winUrl: string | null;
+  linuxUrl: string | null;
   version: string | null;
 }
 
@@ -23,6 +24,7 @@ export function Download() {
   const [assets, setAssets] = useState<ReleaseAssets>({
     macUrl: null,
     winUrl: null,
+    linuxUrl: null,
     version: null,
   });
   const [loading, setLoading] = useState(true);
@@ -43,14 +45,18 @@ export function Download() {
         const winAsset = data.assets?.find((a: { name: string }) =>
           a.name.endsWith(".exe"),
         );
+        const linuxAsset = data.assets?.find((a: { name: string }) =>
+          a.name.endsWith(".AppImage"),
+        );
 
         setAssets({
           macUrl: macAsset?.browser_download_url ?? null,
           winUrl: winAsset?.browser_download_url ?? null,
+          linuxUrl: linuxAsset?.browser_download_url ?? null,
           version: data.tag_name ?? null,
         });
       } catch {
-        if (!cancelled) setAssets({ macUrl: null, winUrl: null, version: null });
+        if (!cancelled) setAssets({ macUrl: null, winUrl: null, linuxUrl: null, version: null });
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -64,6 +70,7 @@ export function Download() {
 
   const macHref = assets.macUrl ?? RELEASES_URL;
   const winHref = assets.winUrl ?? RELEASES_URL;
+  const linuxHref = assets.linuxUrl ?? RELEASES_URL;
   const releaseLabel = loading
     ? "Checking release..."
     : assets.version
@@ -91,7 +98,7 @@ export function Download() {
             </motion.p>
             <motion.h2 {...reveal}>Download the desktop companion.</motion.h2>
             <motion.p {...reveal}>
-              Free for macOS and Windows. Pull your Pace Pro workflows into one
+              Free for macOS, Windows, and Linux. Pull your Pace Pro workflows into one
               desktop app for music sync, direct USB transfer, and training review.
             </motion.p>
 
@@ -178,9 +185,20 @@ export function Download() {
             directAsset={Boolean(assets.winUrl)}
             reduced={reduced}
           />
+          <DownloadOption
+            delay={0.2}
+            href={linuxHref}
+            label="Linux"
+            meta="AppImage for x64 desktops"
+            cta={assets.linuxUrl || loading ? releaseLabel : "View releases"}
+            icon="linux"
+            version={assets.version}
+            directAsset={Boolean(assets.linuxUrl)}
+            reduced={reduced}
+          />
         </div>
 
-        {!loading && !assets.macUrl && !assets.winUrl && (
+        {!loading && !assets.macUrl && !assets.winUrl && !assets.linuxUrl && (
           <motion.p
             className="download-fallback"
             initial={{ opacity: 0 }}
@@ -212,7 +230,7 @@ function DownloadOption({
   label: string;
   meta: string;
   cta: string;
-  icon: "mac" | "windows";
+  icon: "mac" | "windows" | "linux";
   version: string | null;
   directAsset: boolean;
   reduced: boolean;
@@ -240,7 +258,7 @@ function DownloadOption({
       whileTap={reduced ? undefined : { scale: 0.99 }}
     >
       <span className={`download-platform-icon download-platform-icon--${icon}`} aria-hidden="true">
-        {icon === "mac" ? <AppleIcon /> : <WindowsIcon />}
+        {icon === "mac" ? <AppleIcon /> : icon === "windows" ? <WindowsIcon /> : <LinuxIcon />}
       </span>
       <span className="download-option-copy">
         <span>{label}</span>
@@ -269,6 +287,17 @@ function WindowsIcon() {
   return (
     <svg viewBox="0 0 24 24" focusable="false">
       <path fill="currentColor" d="M3 4.8 10.7 3.7v7.4H3V4.8Zm8.7-1.2L21 2.2v8.9h-9.3V3.6ZM3 12.1h7.7v7.5L3 18.5v-6.4Zm8.7 0H21V21l-9.3-1.3v-7.6Z" />
+    </svg>
+  );
+}
+
+function LinuxIcon() {
+  return (
+    <svg viewBox="0 0 24 24" focusable="false">
+      <path
+        fill="currentColor"
+        d="M12.5 2c-2.8 0-5 2.2-5 5 0 .5.1 1 .2 1.5C5.8 9.1 4 11.4 4 14c0 3.3 2.7 6 6 6h.5c.3 1.2 1.3 2 2.5 2s2.2-.8 2.5-2H16c3.3 0 6-2.7 6-6 0-2.6-1.8-4.9-4.2-5.5.1-.5.2-1 .2-1.5 0-2.8-2.2-5-5-5Zm-1.8 3.2c.4 0 .8.3.8.8s-.4.8-.8.8-.8-.3-.8-.8.4-.8.8-.8Zm3.6 0c.4 0 .8.3.8.8s-.4.8-.8.8-.8-.3-.8-.8.4-.8.8-.8ZM8.2 15.8c-.6 0-1-.4-1-1s.4-1 1-1 1 .4 1 1-.4 1-1 1Zm7.6 0c-.6 0-1-.4-1-1s.4-1 1-1 1 .4 1 1-.4 1-1 1Z"
+      />
     </svg>
   );
 }
