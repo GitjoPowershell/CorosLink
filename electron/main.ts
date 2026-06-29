@@ -23,6 +23,7 @@ import {
   syncSpotifyPlaylist
 } from "./spotifyService";
 import {
+  getActivityPaceBaselines,
   getDailyMetrics,
   getRacePredictor,
   getSportTypeMap,
@@ -38,9 +39,11 @@ import {
 } from "./trainingHubService";
 import {
   cancelCorosMapDownload,
+  cancelCorosMapInstall,
   chooseCorosMapFolder,
   clearCorosMapDownloadJob,
   deleteCachedCorosMap,
+  deleteGeneratedRoute,
   downloadCorosMapPackage,
   exportGeneratedRoute,
   generateRoute,
@@ -50,6 +53,7 @@ import {
   getCorosMapManifest,
   getRouteBuilderConfig,
   installCachedCorosMap,
+  installCachedCorosMaps,
   installCorosMapFolder,
   listCachedCorosMaps,
   listCorosMapDownloadJobs,
@@ -58,8 +62,11 @@ import {
   openLocationServicesSettings,
   saveRouteBuilderConfig,
   setCorosMapDownloadListener,
-  setCorosMapInstallProgressListener
+  setCorosMapInstallProgressListener,
+  toCorosMapInstallIpcError,
+  validateRouteApiKey
 } from "./mapService";
+import { startRouteShare, stopRouteShare } from "./routeShareServer";
 import type {
   CorosMapPackage,
   DownloadJob,
@@ -208,6 +215,10 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("before-quit", () => {
+  stopRouteShare();
 });
 
 function registerIpcHandlers(): void {
@@ -379,6 +390,10 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle("trainingHub:getSportTypeMap", () => getSportTypeMap());
 
+  ipcMain.handle("trainingHub:getActivityPaceBaselines", () =>
+    getActivityPaceBaselines()
+  );
+
   ipcMain.handle("trainingHub:getUpcomingWorkouts", (_event, days?: number) =>
     getUpcomingWorkouts(days)
   );
@@ -411,8 +426,25 @@ function registerIpcHandlers(): void {
     getCorosMapInstallProgress()
   );
 
-  ipcMain.handle("maps:installCachedCorosMap", (_event, packageId: string) =>
-    installCachedCorosMap(packageId)
+  ipcMain.handle("maps:cancelCorosMapInstall", () => cancelCorosMapInstall());
+
+  ipcMain.handle("maps:installCachedCorosMap", async (_event, packageId: string) => {
+    try {
+      return await installCachedCorosMap(packageId);
+    } catch (error) {
+      throw toCorosMapInstallIpcError(error);
+    }
+  });
+
+  ipcMain.handle(
+    "maps:installCachedCorosMaps",
+    async (_event, packageIds: string[]) => {
+      try {
+        return await installCachedCorosMaps(packageIds);
+      } catch (error) {
+        throw toCorosMapInstallIpcError(error);
+      }
+    }
   );
 
   ipcMain.handle("maps:deleteCachedCorosMap", (_event, packageId: string) =>
@@ -421,9 +453,13 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle("maps:chooseCorosMapFolder", () => chooseCorosMapFolder());
 
-  ipcMain.handle("maps:installCorosMapFolder", (_event, sourcePath: string) =>
-    installCorosMapFolder(sourcePath)
-  );
+  ipcMain.handle("maps:installCorosMapFolder", async (_event, sourcePath: string) => {
+    try {
+      return await installCorosMapFolder(sourcePath);
+    } catch (error) {
+      throw toCorosMapInstallIpcError(error);
+    }
+  });
 
   ipcMain.handle("maps:getRouteBuilderConfig", () => getRouteBuilderConfig());
 
@@ -453,6 +489,20 @@ function registerIpcHandlers(): void {
   ipcMain.handle("maps:exportGeneratedRoute", (_event, id: string) =>
     exportGeneratedRoute(id)
   );
+
+  ipcMain.handle("maps:deleteGeneratedRoute", (_event, id: string) =>
+    deleteGeneratedRoute(id)
+  );
+
+  ipcMain.handle("maps:validateRouteApiKey", (_event, apiKey: string) =>
+    validateRouteApiKey(apiKey)
+  );
+
+  ipcMain.handle("maps:startRouteShare", (_event, id: string) =>
+    startRouteShare(id)
+  );
+
+  ipcMain.handle("maps:stopRouteShare", () => stopRouteShare());
 
   ipcMain.handle("app:getUpdateStatus", () => getAppUpdateSnapshot());
 

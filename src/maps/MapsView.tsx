@@ -1,24 +1,34 @@
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
+  Activity,
   AlertCircle,
   ArrowLeft,
   ArrowRight,
+  Check,
+  ChevronDown,
+  Clock,
   Download,
   ExternalLink,
+  Flag,
   FolderOpen,
+  Gauge,
   Globe,
   HardDrive,
   KeyRound,
+  Layers,
   Loader2,
   Map as MapIcon,
   MapPin,
   Mountain,
   Navigation,
+  QrCode,
   RefreshCw,
   Route,
   Save,
   Search,
+  TrendingDown,
+  TrendingUp,
   Trash2,
   X,
   Upload
@@ -43,9 +53,13 @@ import type {
   CorosMapPackage,
   GenerateRouteRequest,
   GeneratedRoute,
+  RouteActivityType,
+  RouteApiKeyValidation,
   RouteBuilderConfig,
+  ActivityPaceBaseline,
+  ActivityPaceBaselines,
   RouteElevationPreference,
-  RouteSurfacePreference,
+  RouteShareSession,
   WatchStatus
 } from "../../electron/types";
 import type { CorosLinkApi } from "../coroslink-api";
@@ -53,7 +67,7 @@ import { formatBytes, formatDate } from "../media/libraryUtils";
 
 type MapsTab = "coros" | "routes";
 type RoutePinMode = "start" | "destination" | null;
-type RouteMapLayer = "street" | "dark" | "topo";
+type RouteMapLayer = "street" | "dark" | "topo" | "satellite";
 
 interface RoutePinnedPoint {
   lat: number;
@@ -67,28 +81,55 @@ interface RouteReadinessItem {
 
 const ROUTE_TILE_LAYERS: Record<
   RouteMapLayer,
-  { url: string; attribution: string; maxZoom: number; subdomains?: string }
+  {
+    url: string;
+    attribution: string;
+    maxZoom: number;
+    subdomains?: string;
+    label: string;
+    description: string;
+  }
 > = {
   street: {
     url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     maxZoom: 19,
+    label: "Street",
+    description: "Standard OpenStreetMap roads",
     attribution:
       '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+  },
+  topo: {
+    url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+    maxZoom: 17,
+    label: "Topographic",
+    description: "Contours and terrain for trails",
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, SRTM, &copy; <a href="https://opentopomap.org">OpenTopoMap</a>'
+  },
+  satellite: {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    maxZoom: 19,
+    label: "Satellite",
+    description: "Aerial imagery (Esri World Imagery)",
+    attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics"
   },
   dark: {
     url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
     maxZoom: 19,
     subdomains: "abcd",
+    label: "Dark",
+    description: "Low-glare dark basemap",
     attribution:
       '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-  },
-  topo: {
-    url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
-    maxZoom: 17,
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, SRTM, &copy; <a href="https://opentopomap.org">OpenTopoMap</a>'
   }
 };
+
+const ROUTE_MAP_LAYER_ORDER: RouteMapLayer[] = [
+  "street",
+  "topo",
+  "satellite",
+  "dark"
+];
 
 const ORS_LOGIN_URL = "https://openrouteservice.org/log-in/";
 const ORS_API_INFO_URL = "https://api.openrouteservice.org/";
@@ -220,8 +261,55 @@ function CorosMapsTab({
   const [cachedPackages, setCachedPackages] = useState<
     CachedCorosMapPackage[]
   >([]);
+  const [selectedCachedIds, setSelectedCachedIds] = useState<Set<string>>(
+    () => new Set()
+  );
 
   const freeBytes = watchStatus?.freeBytes;
+  const watchConnected = Boolean(watchStatus?.connected);
+  const batchInstalling = busy === "install-cache-batch";
+
+  useEffect(() => {
+    setSelectedCachedIds((current) => {
+      const validIds = new Set(cachedPackages.map((cached) => cached.packageId));
+      const next = new Set(
+        [...current].filter((packageId) => validIds.has(packageId))
+      );
+      return next.size === current.size ? current : next;
+    });
+  }, [cachedPackages]);
+
+  const transferableCachedIds = useMemo(() => {
+    if (!watchConnected) {
+      return [];
+    }
+
+    return cachedPackages
+      .filter(
+        (cached) => freeBytes === undefined || cached.sizeBytes <= freeBytes
+      )
+      .map((cached) => cached.packageId);
+  }, [cachedPackages, watchConnected, freeBytes]);
+
+  const selectedTotalBytes = useMemo(
+    () =>
+      cachedPackages
+        .filter((cached) => selectedCachedIds.has(cached.packageId))
+        .reduce((sum, cached) => sum + cached.sizeBytes, 0),
+    [cachedPackages, selectedCachedIds]
+  );
+
+  const allTransferableSelected =
+    transferableCachedIds.length > 0 &&
+    transferableCachedIds.every((packageId) =>
+      selectedCachedIds.has(packageId)
+    );
+  const someTransferableSelected = transferableCachedIds.some((packageId) =>
+    selectedCachedIds.has(packageId)
+  );
+  const batchTooLarge =
+    freeBytes !== undefined && selectedTotalBytes > freeBytes;
+  const selectedCount = selectedCachedIds.size;
 
   useEffect(() => {
     void loadManifest();
@@ -340,10 +428,65 @@ function CorosMapsTab({
       setCachedPackages(await api.listCachedCorosMaps());
       onMessage(`Installed ${formatBytes(result.sizeBytes)} of map files.`);
     } catch (caught) {
-      onError(toErrorMessage(caught));
+      reportInstallOutcome(caught, onMessage, onError);
     } finally {
       setBusy(null);
     }
+  }
+
+  async function handleInstallSelectedCached() {
+    const packageIds = [...selectedCachedIds];
+    if (packageIds.length === 0) {
+      return;
+    }
+
+    setBusy("install-cache-batch");
+    onError(null);
+    onMessage(null);
+    try {
+      const result = await api.installCachedCorosMaps(packageIds);
+      onWatchStatusChange(result.watch);
+      setCachedPackages(await api.listCachedCorosMaps());
+      setSelectedCachedIds(new Set());
+      onMessage(
+        `Installed ${formatBytes(result.sizeBytes)} of map files from ${packageIds.length} packages.`
+      );
+    } catch (caught) {
+      reportInstallOutcome(caught, onMessage, onError);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleCancelInstall() {
+    onError(null);
+    onMessage(null);
+    try {
+      await api.cancelCorosMapInstall();
+    } catch (caught) {
+      onError(toErrorMessage(caught));
+    }
+  }
+
+  function toggleCachedSelection(packageId: string) {
+    setSelectedCachedIds((current) => {
+      const next = new Set(current);
+      if (next.has(packageId)) {
+        next.delete(packageId);
+      } else {
+        next.add(packageId);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectAllCached() {
+    if (allTransferableSelected) {
+      setSelectedCachedIds(new Set());
+      return;
+    }
+
+    setSelectedCachedIds(new Set(transferableCachedIds));
   }
 
   async function handleDeleteCached(packageId: string) {
@@ -390,7 +533,7 @@ function CorosMapsTab({
       onWatchStatusChange(result.watch);
       onMessage(`Installed ${formatBytes(result.sizeBytes)} of map files.`);
     } catch (caught) {
-      onError(toErrorMessage(caught));
+      reportInstallOutcome(caught, onMessage, onError);
     } finally {
       setBusy(null);
     }
@@ -465,27 +608,22 @@ function CorosMapsTab({
         <div className="section-heading compact">
           <div>
             <p className="eyebrow">Watch maps</p>
-            <h2>{watchStatus?.connected ? watchStatus.name : "No watch"}</h2>
+            <h2 className="watch-title">
+              <span
+                className={
+                  watchStatus?.connected ? "watch-dot is-online" : "watch-dot"
+                }
+                aria-hidden="true"
+              />
+              {watchStatus?.connected
+                ? watchStatus.name ?? "COROS watch"
+                : "No watch connected"}
+            </h2>
           </div>
           <HardDrive size={20} aria-hidden="true" />
         </div>
 
-        <div className="map-storage-list">
-          <MapStorageMetric
-            label="Free"
-            value={
-              freeBytes !== undefined ? formatBytes(freeBytes) : "Unavailable"
-            }
-          />
-          <MapStorageMetric
-            label="Installed maps"
-            value={formatBytes(watchStatus?.mapSizeBytes ?? 0)}
-          />
-          <MapStorageMetric
-            label="Map files"
-            value={String(watchStatus?.mapFileCount ?? 0)}
-          />
-        </div>
+        <WatchStoragePanel status={watchStatus} />
 
         <div className="maps-warning">
           <AlertCircle size={18} aria-hidden="true" />
@@ -540,7 +678,10 @@ function CorosMapsTab({
         </div>
 
         {installProgress ? (
-          <MapInstallProgressPanel progress={installProgress} />
+          <MapInstallProgressPanel
+            progress={installProgress}
+            onCancel={() => void handleCancelInstall()}
+          />
         ) : null}
 
         <div className="map-cache-section">
@@ -559,19 +700,75 @@ function CorosMapsTab({
           {cachedPackages.length === 0 ? (
             <p className="map-cache-empty">No cached map packages.</p>
           ) : (
-            <div className="map-cache-list">
-              {cachedPackages.map((cached) => (
-                <CachedMapRow
-                  key={cached.packageId}
-                  cached={cached}
-                  busy={busy}
-                  watchConnected={Boolean(watchStatus?.connected)}
-                  freeBytes={freeBytes}
-                  onInstall={handleInstallCached}
-                  onDelete={handleDeleteCached}
-                />
-              ))}
-            </div>
+            <>
+              <div className="map-cache-toolbar">
+                <label className="check-row map-cache-select-all">
+                  <input
+                    type="checkbox"
+                    checked={allTransferableSelected}
+                    ref={(input) => {
+                      if (input) {
+                        input.indeterminate =
+                          someTransferableSelected && !allTransferableSelected;
+                      }
+                    }}
+                    onChange={toggleSelectAllCached}
+                    disabled={
+                      !watchConnected ||
+                      transferableCachedIds.length === 0 ||
+                      batchInstalling
+                    }
+                  />
+                  Select all
+                </label>
+                <button
+                  type="button"
+                  className="primary-button map-cache-transfer-button"
+                  onClick={() => void handleInstallSelectedCached()}
+                  disabled={
+                    selectedCount === 0 ||
+                    !watchConnected ||
+                    batchInstalling ||
+                    batchTooLarge
+                  }
+                >
+                  {batchInstalling ? (
+                    <Loader2 className="spin" size={17} aria-hidden="true" />
+                  ) : (
+                    <Upload size={17} aria-hidden="true" />
+                  )}
+                  Transfer selected{selectedCount > 0 ? ` (${selectedCount})` : ""}
+                </button>
+              </div>
+              {batchTooLarge ? (
+                <small className="map-cache-batch-warning">
+                  Selected packages exceed current free space (
+                  {formatBytes(selectedTotalBytes)} selected,{" "}
+                  {formatBytes(freeBytes!)} free)
+                </small>
+              ) : null}
+              <div className="map-cache-list">
+                {cachedPackages.map((cached) => (
+                  <CachedMapRow
+                    key={cached.packageId}
+                    cached={cached}
+                    busy={busy}
+                    watchConnected={watchConnected}
+                    freeBytes={freeBytes}
+                    selected={selectedCachedIds.has(cached.packageId)}
+                    selectionDisabled={
+                      batchInstalling ||
+                      !watchConnected ||
+                      (freeBytes !== undefined &&
+                        cached.sizeBytes > freeBytes)
+                    }
+                    onToggleSelect={toggleCachedSelection}
+                    onInstall={handleInstallCached}
+                    onDelete={handleDeleteCached}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </div>
       </section>
@@ -684,36 +881,121 @@ function CorosMapsTab({
   );
 }
 
-function MapStorageMetric({ label, value }: { label: string; value: string }) {
+function WatchStoragePanel({ status }: { status: WatchStatus | null }) {
+  if (!status?.connected) {
+    return (
+      <div className="watch-storage is-empty">
+        <HardDrive size={18} aria-hidden="true" />
+        <p>
+          Connect your COROS watch over USB to see storage and install maps.
+        </p>
+      </div>
+    );
+  }
+
+  const total = status.totalBytes;
+  const free = status.freeBytes;
+  const used =
+    status.usedBytes ??
+    (total !== undefined && free !== undefined ? total - free : undefined);
+  const maps = status.mapSizeBytes ?? 0;
+  const hasBar =
+    total !== undefined && total > 0 && used !== undefined && used >= 0;
+  const mapsPct = hasBar ? Math.min(100, (maps / total) * 100) : 0;
+  const otherPct = hasBar
+    ? Math.max(0, Math.min(100 - mapsPct, ((used - maps) / total) * 100))
+    : 0;
+  const other = used !== undefined ? Math.max(0, used - maps) : undefined;
+
   return (
-    <div className="map-storage-metric">
-      <span>{label}</span>
+    <div className="watch-storage">
+      {hasBar ? (
+        <>
+          <div
+            className="watch-storage-bar"
+            role="img"
+            aria-label={`${formatBytes(used)} of ${formatBytes(total)} used`}
+          >
+            <span className="seg maps" style={{ width: `${mapsPct}%` }} />
+            <span className="seg other" style={{ width: `${otherPct}%` }} />
+          </div>
+          <div className="watch-storage-caption">
+            <span>
+              <strong>{formatBytes(used)}</strong> used
+            </span>
+            <span>{formatBytes(total)} total</span>
+          </div>
+        </>
+      ) : null}
+
+      <div className="watch-storage-legend">
+        <WatchStorageLegend
+          swatch="maps"
+          label="Maps"
+          value={`${formatBytes(maps)} · ${status.mapFileCount ?? 0} files`}
+        />
+        {other !== undefined ? (
+          <WatchStorageLegend
+            swatch="other"
+            label="Other"
+            value={formatBytes(other)}
+          />
+        ) : null}
+        <WatchStorageLegend
+          swatch="free"
+          label="Free"
+          value={free !== undefined ? formatBytes(free) : "—"}
+        />
+      </div>
+    </div>
+  );
+}
+
+function WatchStorageLegend({
+  swatch,
+  label,
+  value
+}: {
+  swatch: "maps" | "other" | "free";
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="watch-storage-legend-item">
+      <span className={`watch-storage-swatch ${swatch}`} aria-hidden="true" />
+      <span className="watch-storage-legend-label">{label}</span>
       <strong>{value}</strong>
     </div>
   );
 }
 
 function MapInstallProgressPanel({
-  progress
+  progress,
+  onCancel
 }: {
   progress: CorosMapInstallProgress;
+  onCancel: () => void;
 }) {
   const percent = Math.round(Math.max(0, Math.min(progress.progress, 1)) * 100);
   const phaseLabel =
     progress.phase === "failed"
       ? "Install failed"
-      : progress.phase === "completed"
-        ? "Install complete"
-        : progress.phase === "preparing"
-          ? "Preparing install"
-          : "Copying to watch";
+      : progress.phase === "cancelled"
+        ? "Transfer cancelled"
+        : progress.phase === "completed"
+          ? "Install complete"
+          : progress.phase === "preparing"
+            ? "Preparing install"
+            : "Copying to watch";
 
   return (
     <div
       className={
         progress.phase === "failed"
           ? "map-install-progress is-failed"
-          : "map-install-progress"
+          : progress.phase === "cancelled"
+            ? "map-install-progress is-cancelled"
+            : "map-install-progress"
       }
     >
       <div className="map-install-progress-heading">
@@ -731,7 +1013,16 @@ function MapInstallProgressPanel({
       {progress.error ? (
         <p className="map-install-error">{progress.error}</p>
       ) : progress.active ? (
-        <p>Keep the watch connected until the copy finishes.</p>
+        <div className="map-install-progress-actions">
+          <p>Keep the watch connected until the copy finishes.</p>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onCancel}
+          >
+            Cancel transfer
+          </button>
+        </div>
       ) : null}
     </div>
   );
@@ -911,6 +1202,9 @@ function CachedMapRow({
   busy,
   watchConnected,
   freeBytes,
+  selected,
+  selectionDisabled,
+  onToggleSelect,
   onInstall,
   onDelete
 }: {
@@ -918,14 +1212,28 @@ function CachedMapRow({
   busy: string | null;
   watchConnected: boolean;
   freeBytes?: number;
+  selected: boolean;
+  selectionDisabled: boolean;
+  onToggleSelect: (packageId: string) => void;
   onInstall: (packageId: string) => void;
   onDelete: (packageId: string) => void;
 }) {
   const tooLarge = freeBytes !== undefined && cached.sizeBytes > freeBytes;
-  const installing = busy === `install-cache:${cached.packageId}`;
+  const installing =
+    busy === `install-cache:${cached.packageId}` ||
+    busy === "install-cache-batch";
 
   return (
     <div className="map-cache-row">
+      <label className="check-row map-cache-row-check">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => onToggleSelect(cached.packageId)}
+          disabled={selectionDisabled}
+          aria-label={`Select ${cached.title}`}
+        />
+      </label>
       <div>
         <strong>{cached.title}</strong>
         <span>
@@ -941,7 +1249,7 @@ function CachedMapRow({
           onClick={() => onInstall(cached.packageId)}
           disabled={!watchConnected || tooLarge || installing}
         >
-          {installing ? (
+          {busy === `install-cache:${cached.packageId}` ? (
             <Loader2 className="spin" size={15} aria-hidden="true" />
           ) : (
             <Upload size={15} aria-hidden="true" />
@@ -952,7 +1260,9 @@ function CachedMapRow({
           className="icon-button"
           title="Delete cached package"
           onClick={() => onDelete(cached.packageId)}
-          disabled={busy === `delete-cache:${cached.packageId}`}
+          disabled={
+            busy === `delete-cache:${cached.packageId}` || installing
+          }
         >
           {busy === `delete-cache:${cached.packageId}` ? (
             <Loader2 className="spin" size={15} aria-hidden="true" />
@@ -983,6 +1293,7 @@ function RouteBuilderTab({
     destinationLocation: "",
     distanceKm: 5,
     mode: "loop",
+    activityType: "running",
     surfacePreference: "road",
     avoidHighways: false,
     elevationPreference: "any"
@@ -999,6 +1310,12 @@ function RouteBuilderTab({
   const [locationIssue, setLocationIssue] = useState(false);
   const [mapLayer, setMapLayer] = useState<RouteMapLayer>("street");
   const [fitRequestId, setFitRequestId] = useState(0);
+  const [keyValidation, setKeyValidation] =
+    useState<RouteApiKeyValidation | null>(null);
+  const [shareSession, setShareSession] = useState<RouteShareSession | null>(
+    null
+  );
+  const [paceBaselines, setPaceBaselines] = useState<ActivityPaceBaselines>({});
 
   const draftOpenRouteServiceApiKey = config.openRouteServiceApiKey.trim();
   const hasSavedOpenRouteServiceApiKey =
@@ -1027,6 +1344,21 @@ function RouteBuilderTab({
       .catch((caught) => onError(toErrorMessage(caught)));
   }, [api, onError]);
 
+  useEffect(() => {
+    // Tear down the LAN share server if the user leaves the Route Builder.
+    return () => {
+      void api.stopRouteShare().catch(() => undefined);
+    };
+  }, [api]);
+
+  useEffect(() => {
+    // Personalise time estimates per sport from stored COROS history when available.
+    void api
+      .getActivityPaceBaselines()
+      .then(setPaceBaselines)
+      .catch(() => setPaceBaselines({}));
+  }, [api]);
+
   async function handleSaveConfig(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy("save-config");
@@ -1036,11 +1368,40 @@ function RouteBuilderTab({
       const nextConfig = await api.saveRouteBuilderConfig(config);
       setConfig(nextConfig);
       setSavedOpenRouteServiceApiKey(nextConfig.openRouteServiceApiKey);
-      onMessage(
-        nextConfig.openRouteServiceApiKey.trim()
-          ? "Route API key saved."
-          : "Route API key cleared."
-      );
+      const trimmedKey = nextConfig.openRouteServiceApiKey.trim();
+      if (!trimmedKey) {
+        setKeyValidation(null);
+        onMessage("Route API key cleared.");
+        return;
+      }
+      onMessage("Route API key saved. Verifying…");
+      const validation = await api.validateRouteApiKey(trimmedKey);
+      setKeyValidation(validation);
+      if (validation.status === "valid") {
+        onMessage("Route API key saved and verified.");
+      } else {
+        onMessage(null);
+        onError(validation.message);
+      }
+    } catch (caught) {
+      onError(toErrorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runGenerate(
+    routeRequest: GenerateRouteRequest,
+    successMessage: string
+  ) {
+    setBusy("generate-route");
+    onError(null);
+    onMessage(null);
+    try {
+      const route = await api.generateRoute(routeRequest);
+      setActiveRoute(route);
+      setRoutes(await api.listGeneratedRoutes());
+      onMessage(successMessage);
     } catch (caught) {
       onError(toErrorMessage(caught));
     } finally {
@@ -1059,19 +1420,18 @@ function RouteBuilderTab({
       return;
     }
 
-    setBusy("generate-route");
-    onError(null);
-    onMessage(null);
-    try {
-      const route = await api.generateRoute(request);
-      setActiveRoute(route);
-      setRoutes(await api.listGeneratedRoutes());
-      onMessage("Route generated.");
-    } catch (caught) {
-      onError(toErrorMessage(caught));
-    } finally {
-      setBusy(null);
+    await runGenerate(request, "Route generated.");
+  }
+
+  async function handleRegenerate() {
+    if (routeGenerationDisabled) {
+      return;
     }
+    // A fresh seed nudges ORS round_trip into a different loop.
+    await runGenerate(
+      { ...request, variationSeed: Date.now() },
+      "Generated a fresh loop."
+    );
   }
 
   async function handleExport(route: GeneratedRoute) {
@@ -1095,6 +1455,60 @@ function RouteBuilderTab({
     if (mode === "loop" && pinMode === "destination") {
       setPinMode(null);
     }
+  }
+
+  function handleActivityChange(activityType: RouteActivityType) {
+    setRequest((current) => {
+      const maxDistance = maxDistanceForActivity(activityType);
+      return {
+        ...current,
+        activityType,
+        surfacePreference: surfaceForActivity(activityType),
+        // Highways only matter for cycling; clear the flag for foot sports.
+        avoidHighways: isCyclingActivity(activityType)
+          ? current.avoidHighways
+          : false,
+        distanceKm: Math.min(current.distanceKm, maxDistance)
+      };
+    });
+  }
+
+  async function handleDeleteRoute(route: GeneratedRoute) {
+    setBusy(`delete:${route.id}`);
+    onError(null);
+    onMessage(null);
+    try {
+      await api.deleteGeneratedRoute(route.id);
+      const nextRoutes = await api.listGeneratedRoutes();
+      setRoutes(nextRoutes);
+      setActiveRoute((current) =>
+        current?.id === route.id ? nextRoutes[0] ?? null : current
+      );
+      onMessage("Route deleted.");
+    } catch (caught) {
+      onError(toErrorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleShareToPhone(route: GeneratedRoute) {
+    setBusy(`share:${route.id}`);
+    onError(null);
+    onMessage(null);
+    try {
+      const session = await api.startRouteShare(route.id);
+      setShareSession(session);
+    } catch (caught) {
+      onError(toErrorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function handleCloseShare() {
+    setShareSession(null);
+    void api.stopRouteShare().catch(() => undefined);
   }
 
   function handlePinModeChange(mode: Exclude<RoutePinMode, null>) {
@@ -1345,6 +1759,21 @@ function RouteBuilderTab({
                 <p className="route-api-note">
                   Save the OpenRouteService key before generating a route.
                 </p>
+              ) : keyValidation && keyValidation.status !== "empty" ? (
+                <p
+                  className={
+                    keyValidation.status === "valid"
+                      ? "route-api-note is-valid"
+                      : "route-api-note is-invalid"
+                  }
+                >
+                  {keyValidation.status === "valid" ? (
+                    <Check size={14} aria-hidden="true" />
+                  ) : (
+                    <AlertCircle size={14} aria-hidden="true" />
+                  )}
+                  {keyValidation.message}
+                </p>
               ) : null}
             </>
           )}
@@ -1480,44 +1909,22 @@ function RouteBuilderTab({
 
           <div className="route-form-row">
             <label className="route-field">
-              <span>Distance</span>
-              <input
-                className="maps-number-input"
-                type="number"
-                min="1"
-                max="100"
-                step="0.5"
-                value={request.distanceKm}
-                onChange={(event) =>
-                  setRequestField(
-                    setRequest,
-                    "distanceKm",
-                    Number(event.target.value)
-                  )
-                }
-              />
-            </label>
-
-            <label className="route-field">
-              <span>Surface</span>
+              <span>Sport</span>
               <select
                 className="maps-select"
-                value={request.surfacePreference}
+                value={request.activityType}
                 onChange={(event) =>
-                  setRequestField(
-                    setRequest,
-                    "surfacePreference",
-                    event.target.value as RouteSurfacePreference
-                  )
+                  handleActivityChange(event.target.value as RouteActivityType)
                 }
               >
-                <option value="road">Road</option>
-                <option value="trail">Trail</option>
+                {ROUTE_ACTIVITY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </label>
-          </div>
 
-          <div className="route-form-row">
             <label className="route-field">
               <span>Elevation</span>
               <select
@@ -1536,33 +1943,98 @@ function RouteBuilderTab({
                 <option value="hilly">Hilly</option>
               </select>
             </label>
-
-            <label className="check-row route-check is-disabled">
-              <input
-                type="checkbox"
-                checked={false}
-                disabled
-                onChange={() => undefined}
-              />
-              Avoid highways
-              <small>Not supported by ORS walking routes</small>
-            </label>
           </div>
+
+          <label className="route-field route-distance-field">
+            <div className="route-distance-header">
+              <span>Distance</span>
+              <strong>{request.distanceKm.toFixed(1)} km</strong>
+            </div>
+            <div className="route-distance-controls">
+              <input
+                className="route-distance-slider"
+                type="range"
+                min="1"
+                max={maxDistanceForActivity(request.activityType)}
+                step="0.5"
+                value={request.distanceKm}
+                onChange={(event) =>
+                  setRequestField(
+                    setRequest,
+                    "distanceKm",
+                    Number(event.target.value)
+                  )
+                }
+              />
+              <input
+                className="maps-number-input"
+                type="number"
+                min="1"
+                max={maxDistanceForActivity(request.activityType)}
+                step="0.5"
+                value={request.distanceKm}
+                onChange={(event) =>
+                  setRequestField(
+                    setRequest,
+                    "distanceKm",
+                    Number(event.target.value)
+                  )
+                }
+              />
+            </div>
+          </label>
+
+          <label
+            className={
+              isCyclingActivity(request.activityType)
+                ? "check-row route-check"
+                : "check-row route-check is-disabled"
+            }
+          >
+            <input
+              type="checkbox"
+              checked={
+                isCyclingActivity(request.activityType) && request.avoidHighways
+              }
+              disabled={!isCyclingActivity(request.activityType)}
+              onChange={(event) =>
+                setRequestField(setRequest, "avoidHighways", event.target.checked)
+              }
+            />
+            Avoid highways
+            {!isCyclingActivity(request.activityType) ? (
+              <small>Only available for cycling routes</small>
+            ) : null}
+          </label>
 
           <RouteReadiness items={routeReadiness.items} />
 
-          <button
-            type="submit"
-            className="primary-button"
-            disabled={routeGenerationDisabled}
-          >
-            {busy === "generate-route" ? (
-              <Loader2 className="spin" size={18} aria-hidden="true" />
-            ) : (
-              <Route size={18} aria-hidden="true" />
-            )}
-            Generate Route
-          </button>
+          <div className="route-generate-actions">
+            <button
+              type="submit"
+              className="primary-button"
+              disabled={routeGenerationDisabled}
+            >
+              {busy === "generate-route" ? (
+                <Loader2 className="spin" size={18} aria-hidden="true" />
+              ) : (
+                <Route size={18} aria-hidden="true" />
+              )}
+              Generate Route
+            </button>
+            {request.mode === "loop" ? (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void handleRegenerate()}
+                disabled={routeGenerationDisabled}
+                title="Generate a different loop with the same settings"
+              >
+                <RefreshCw size={17} aria-hidden="true" />
+                Shuffle loop
+              </button>
+            ) : null}
+          </div>
           </form>
         </section>
 
@@ -1573,21 +2045,49 @@ function RouteBuilderTab({
               <h2>{activeRoute?.name ?? "No route"}</h2>
             </div>
             {activeRoute ? (
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => void handleExport(activeRoute)}
-                disabled={busy === `export:${activeRoute.id}`}
-              >
-                {busy === `export:${activeRoute.id}` ? (
-                  <Loader2 className="spin" size={17} aria-hidden="true" />
-                ) : (
-                  <Download size={17} aria-hidden="true" />
-                )}
-                Export GPX
-              </button>
+              <div className="route-preview-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void handleShareToPhone(activeRoute)}
+                  disabled={busy === `share:${activeRoute.id}`}
+                  title="Show a QR code to open this route on your phone"
+                >
+                  {busy === `share:${activeRoute.id}` ? (
+                    <Loader2 className="spin" size={17} aria-hidden="true" />
+                  ) : (
+                    <QrCode size={17} aria-hidden="true" />
+                  )}
+                  Share to phone
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => void handleExport(activeRoute)}
+                  disabled={busy === `export:${activeRoute.id}`}
+                >
+                  {busy === `export:${activeRoute.id}` ? (
+                    <Loader2 className="spin" size={17} aria-hidden="true" />
+                  ) : (
+                    <Download size={17} aria-hidden="true" />
+                  )}
+                  Export GPX
+                </button>
+              </div>
             ) : null}
           </div>
+
+          {activeRoute ? (
+            <p className="route-watch-hint">
+              <Navigation size={14} aria-hidden="true" />
+              <span>
+                To navigate on your COROS watch, export this GPX, then import it
+                in the COROS phone app under <strong>Profile → Route Library</strong>.
+                It syncs to the watch over Bluetooth. (COROS watches can’t import
+                routes over the USB cable.)
+              </span>
+            </p>
+          ) : null}
 
           <RouteMapToolbar
             request={request}
@@ -1618,26 +2118,67 @@ function RouteBuilderTab({
               fitRequestId={fitRequestId}
               onPickPoint={handlePickRoutePoint}
             />
-            <RouteStatsSidebar route={activeRoute} request={request} />
+            <RouteStatsSidebar
+              route={activeRoute}
+              request={request}
+              paceBaselines={paceBaselines}
+            />
           </div>
 
           {routes.length > 0 ? (
             <div className="route-history">
               <h3>Recent routes</h3>
               {routes.map((route) => (
-                <button
+                <div
                   key={route.id}
-                  type="button"
                   className={
                     activeRoute?.id === route.id
                       ? "route-history-row active"
                       : "route-history-row"
                   }
-                  onClick={() => setActiveRoute(route)}
                 >
-                  <span>{route.name}</span>
-                  <small>{formatDate(route.createdAt)}</small>
-                </button>
+                  <button
+                    type="button"
+                    className="route-history-select"
+                    onClick={() => setActiveRoute(route)}
+                  >
+                    <span>{route.name}</span>
+                    <small>
+                      {activityTypeLabel(route.activityType)} ·{" "}
+                      {formatDate(route.createdAt)}
+                    </small>
+                  </button>
+                  <div className="route-history-actions">
+                    <button
+                      type="button"
+                      className="icon-button"
+                      onClick={() => void handleExport(route)}
+                      disabled={busy === `export:${route.id}`}
+                      title="Export GPX"
+                      aria-label="Export route as GPX"
+                    >
+                      {busy === `export:${route.id}` ? (
+                        <Loader2 className="spin" size={15} aria-hidden="true" />
+                      ) : (
+                        <Download size={15} aria-hidden="true" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button danger"
+                      onClick={() => void handleDeleteRoute(route)}
+                      disabled={busy === `delete:${route.id}`}
+                      title="Delete route"
+                      aria-label="Delete route"
+                    >
+                      {busy === `delete:${route.id}` ? (
+                        <Loader2 className="spin" size={15} aria-hidden="true" />
+                      ) : (
+                        <Trash2 size={15} aria-hidden="true" />
+                      )}
+                    </button>
+                  </div>
+                </div>
               ))}
             </div>
           ) : null}
@@ -1650,7 +2191,62 @@ function RouteBuilderTab({
           onClose={() => setHelpBrowserUrl(null)}
         />
       ) : null}
+
+      {shareSession ? (
+        <RouteShareModal session={shareSession} onClose={handleCloseShare} />
+      ) : null}
     </>
+  );
+}
+
+function RouteShareModal({
+  session,
+  onClose
+}: {
+  session: RouteShareSession;
+  onClose: () => void;
+}) {
+  return (
+    <div className="route-share-overlay" role="dialog" aria-modal="true">
+      <div className="route-share-modal">
+        <div className="route-share-header">
+          <div>
+            <p className="eyebrow">Share to phone</p>
+            <h3>Scan to open on your phone</h3>
+          </div>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+
+        <img
+          className="route-share-qr"
+          src={session.qrDataUrl}
+          alt="QR code linking to the route GPX"
+          width={240}
+          height={240}
+        />
+
+        <ol className="route-share-steps">
+          <li>Make sure your phone is on the same Wi-Fi as this computer.</li>
+          <li>Open the camera and scan the code to download the GPX.</li>
+          <li>
+            Tap <strong>Share / Open with…</strong> and choose the COROS app to
+            import the route.
+          </li>
+        </ol>
+
+        <p className="route-share-url">{session.url}</p>
+        <small className="route-share-note">
+          Link works on your local network only and expires in ~10 minutes.
+        </small>
+      </div>
+    </div>
   );
 }
 
@@ -2131,18 +2727,7 @@ function RouteMapToolbar({
         </button>
       </div>
 
-      <div className="route-layer-switcher" aria-label="Map layer">
-        {(["street", "dark", "topo"] as RouteMapLayer[]).map((layer) => (
-          <button
-            key={layer}
-            type="button"
-            className={mapLayer === layer ? "active" : ""}
-            onClick={() => onLayerChange(layer)}
-          >
-            {routeMapLayerLabel(layer)}
-          </button>
-        ))}
-      </div>
+      <RouteMapLayerDropdown value={mapLayer} onChange={onLayerChange} />
 
       {locationIssue ? (
         <div className="route-location-issue">
@@ -2203,25 +2788,132 @@ function RouteMapToolbar({
   );
 }
 
+function RouteMapLayerDropdown({
+  value,
+  onChange
+}: {
+  value: RouteMapLayer;
+  onChange: (layer: RouteMapLayer) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    function handlePointerDown(event: MouseEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  const active = ROUTE_TILE_LAYERS[value];
+
+  return (
+    <div className="route-layer-dropdown" ref={containerRef}>
+      <button
+        type="button"
+        className="route-layer-trigger"
+        onClick={() => setOpen((current) => !current)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <Layers size={15} aria-hidden="true" />
+        <span className="route-layer-trigger-label">{active.label}</span>
+        <ChevronDown
+          size={15}
+          aria-hidden="true"
+          className={open ? "route-layer-chevron is-open" : "route-layer-chevron"}
+        />
+      </button>
+
+      {open ? (
+        <ul className="route-layer-menu" role="listbox">
+          {ROUTE_MAP_LAYER_ORDER.map((layer) => {
+            const config = ROUTE_TILE_LAYERS[layer];
+            const selected = layer === value;
+            return (
+              <li key={layer}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  className={
+                    selected
+                      ? "route-layer-option is-selected"
+                      : "route-layer-option"
+                  }
+                  onClick={() => {
+                    onChange(layer);
+                    setOpen(false);
+                  }}
+                >
+                  <span className="route-layer-option-text">
+                    <strong>{config.label}</strong>
+                    <small>{config.description}</small>
+                  </span>
+                  {selected ? (
+                    <Check size={15} aria-hidden="true" />
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function RouteStatsSidebar({
   route,
-  request
+  request,
+  paceBaselines
 }: {
   route: GeneratedRoute | null;
   request: GenerateRouteRequest;
+  paceBaselines: ActivityPaceBaselines;
 }) {
   const requestedDistance = Number(request.distanceKm);
-  const distanceLabel = route
-    ? `${(route.distanceMeters / 1000).toFixed(1)} km`
-    : Number.isFinite(requestedDistance) && requestedDistance > 0
-      ? `${requestedDistance.toFixed(1)} km target`
-      : "Not set";
+  const hasTargetDistance =
+    Number.isFinite(requestedDistance) && requestedDistance > 0;
+  const distanceValue = route
+    ? (route.distanceMeters / 1000).toFixed(1)
+    : hasTargetDistance
+      ? requestedDistance.toFixed(1)
+      : "—";
+  const distanceUnit = route ? "km" : hasTargetDistance ? "km target" : "";
+
+  const activityType = route?.activityType ?? request.activityType;
+  const cycling = isCyclingActivity(activityType);
+  const baseline = route ? paceBaselines[route.activityType] : undefined;
+  const duration = route
+    ? effectiveRouteDuration(route, baseline)
+    : { seconds: undefined, estimated: false, fromHistory: false };
+  const paceSpeed = route ? formatPaceOrSpeed(route, duration.seconds) : null;
+  const climbRate = route ? climbRatePerKm(route) : undefined;
+  const highwaysAvoided =
+    cycling && (route ? route.avoidHighways : request.avoidHighways);
+
   const startLabel = route?.startLocation || request.startLocation || "Not set";
   const destinationLabel =
     route?.destinationLocation ||
     (request.mode === "point-to-point"
       ? request.destinationLocation || "Not set"
-      : "Loop route");
+      : "Loop — returns to start");
 
   return (
     <aside className="route-stats-sidebar">
@@ -2230,55 +2922,142 @@ function RouteStatsSidebar({
         <h3>{route ? "Generated route" : "Route plan"}</h3>
       </div>
 
-      <div className="route-stat-list">
-        <RouteStat label="Distance" value={distanceLabel} />
+      <div className="route-stats-hero">
+        <div className="route-stats-distance">
+          <strong>{distanceValue}</strong>
+          {distanceUnit ? <span>{distanceUnit}</span> : null}
+        </div>
+        <div className="route-stats-chips">
+          <span className="route-chip">{activityTypeLabel(activityType)}</span>
+          <span className="route-chip subtle">
+            {routeModeLabel(route?.mode ?? request.mode)}
+          </span>
+        </div>
+      </div>
+
+      <div className="route-stat-grid">
         <RouteStat
-          label="Duration"
-          value={route ? formatDuration(route.durationSeconds) : "After generation"}
+          icon={<Clock size={14} aria-hidden="true" />}
+          label={duration.estimated ? "Est. time" : "Duration"}
+          value={route ? formatDuration(duration.seconds) : "—"}
         />
         <RouteStat
-          label="Elevation"
+          icon={<Gauge size={14} aria-hidden="true" />}
+          label={cycling ? "Avg speed" : duration.estimated ? "Est. pace" : "Avg pace"}
+          value={paceSpeed ?? "—"}
+        />
+        <RouteStat
+          icon={<TrendingUp size={14} aria-hidden="true" />}
+          label="Ascent"
+          value={route ? formatMeters(route.ascentMeters) : "—"}
+        />
+        <RouteStat
+          icon={<TrendingDown size={14} aria-hidden="true" />}
+          label="Descent"
+          value={route ? formatMeters(route.descentMeters) : "—"}
+        />
+        <RouteStat
+          icon={<Mountain size={14} aria-hidden="true" />}
+          label="Climb"
+          value={climbRate !== undefined ? `${Math.round(climbRate)} m/km` : "—"}
+        />
+        <RouteStat
+          icon={<Activity size={14} aria-hidden="true" />}
+          label="Terrain"
           value={
-            route
-              ? `${formatMeters(route.ascentMeters)} up / ${formatMeters(route.descentMeters)} down`
+            climbRate !== undefined
+              ? difficultyFromClimbRate(climbRate)
               : formatElevationPreference(request.elevationPreference)
           }
         />
-        <RouteStat
-          label="Mode"
-          value={routeModeLabel(route?.mode ?? request.mode)}
-        />
-        <RouteStat
-          label="Surface"
-          value={surfacePreferenceLabel(
-            route?.surfacePreference ?? request.surfacePreference
-          )}
-        />
-        <RouteStat
-          label="Points"
-          value={route ? String(route.points.length) : "After generation"}
-        />
       </div>
 
+      {highwaysAvoided ? (
+        <p className="route-stats-flag">
+          <Check size={14} aria-hidden="true" />
+          Highways avoided
+        </p>
+      ) : null}
+
+      {route ? <RouteElevationProfile points={route.points} /> : null}
+
       <div className="route-stat-locations">
-        <RouteStat label="Start" value={startLabel} />
-        <RouteStat label="End" value={destinationLabel} />
+        <RouteStat
+          icon={<MapPin size={14} aria-hidden="true" />}
+          label="Start"
+          value={startLabel}
+        />
+        <RouteStat
+          icon={<Flag size={14} aria-hidden="true" />}
+          label="End"
+          value={destinationLabel}
+        />
       </div>
 
       {route ? (
         <small className="route-stats-footnote">
-          Generated {formatDate(route.createdAt)}
+          {route.points.length.toLocaleString()} track points · Generated{" "}
+          {formatDate(route.createdAt)}
+          {duration.estimated
+            ? duration.fromHistory
+              ? ` · Time from your COROS ${activityTypeLabel(
+                  route.activityType
+                ).toLowerCase()} pace (${baseline?.sampleSize})`
+              : " · Time estimated for running"
+            : ""}
         </small>
       ) : null}
     </aside>
   );
 }
 
-function RouteStat({ label, value }: { label: string; value: string }) {
+function RouteElevationProfile({
+  points
+}: {
+  points: GeneratedRoute["points"];
+}) {
+  const profile = useMemo(() => buildElevationProfile(points), [points]);
+  if (!profile) {
+    return null;
+  }
+
+  return (
+    <div className="route-elevation">
+      <div className="route-elevation-head">
+        <span>Elevation</span>
+        <small>
+          {Math.round(profile.minEle)}–{Math.round(profile.maxEle)} m
+        </small>
+      </div>
+      <svg
+        className="route-elevation-chart"
+        viewBox="0 0 100 32"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        <polygon className="route-elevation-fill" points={profile.areaPoints} />
+        <polyline className="route-elevation-line" points={profile.linePoints} />
+      </svg>
+    </div>
+  );
+}
+
+function RouteStat({
+  label,
+  value,
+  icon
+}: {
+  label: string;
+  value: string;
+  icon?: ReactNode;
+}) {
   return (
     <div className="route-stat-item">
-      <span>{label}</span>
-      <strong>{value}</strong>
+      <span>
+        {icon}
+        {label}
+      </span>
+      <strong title={value}>{value}</strong>
     </div>
   );
 }
@@ -2301,9 +3080,80 @@ function RoutePreviewMap({
   onPickPoint: (point: RoutePinnedPoint) => void;
 }) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
+  const overlayRef = useRef<L.LayerGroup | null>(null);
+  const lastFitRequestId = useRef(fitRequestId);
+  const lastRouteRef = useRef<GeneratedRoute | null>(null);
+  // Keep click-handler dependencies in refs so the map is built only once.
+  const pinModeRef = useRef(pinMode);
+  const onPickPointRef = useRef(onPickPoint);
+  pinModeRef.current = pinMode;
+  onPickPointRef.current = onPickPoint;
 
+  // Create the map exactly once, then reuse it across prop changes so zoom/pan
+  // and tile state survive re-renders.
   useEffect(() => {
     const container = mapContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const map = L.map(container, {
+      zoomControl: true,
+      attributionControl: true,
+      scrollWheelZoom: true
+    });
+    map.setView([39.5, -98.35], 4);
+    mapRef.current = map;
+    overlayRef.current = L.layerGroup().addTo(map);
+
+    map.on("click", (event: L.LeafletMouseEvent) => {
+      if (!pinModeRef.current) {
+        return;
+      }
+      onPickPointRef.current({ lat: event.latlng.lat, lon: event.latlng.lng });
+    });
+
+    const resizeObserver = new ResizeObserver(() => map.invalidateSize());
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+      map.remove();
+      mapRef.current = null;
+      overlayRef.current = null;
+      tileLayerRef.current = null;
+    };
+  }, []);
+
+  // Swap the tile layer in place instead of rebuilding the map.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+    const config = ROUTE_TILE_LAYERS[mapLayer];
+    const nextLayer = L.tileLayer(config.url, {
+      maxZoom: config.maxZoom,
+      attribution: config.attribution,
+      ...(config.subdomains ? { subdomains: config.subdomains } : {})
+    }).addTo(map);
+    if (tileLayerRef.current) {
+      map.removeLayer(tileLayerRef.current);
+    }
+    tileLayerRef.current = nextLayer;
+  }, [mapLayer]);
+
+  // Redraw the route polyline and markers whenever the geometry changes.
+  useEffect(() => {
+    const map = mapRef.current;
+    const overlay = overlayRef.current;
+    if (!map || !overlay) {
+      return;
+    }
+    overlay.clearLayers();
+
     const routePoints = route?.points
       .filter((point) => point.lat !== undefined && point.lon !== undefined)
       .map((point) => [point.lat!, point.lon!] as [number, number]);
@@ -2312,26 +3162,6 @@ function RoutePreviewMap({
       request.mode === "point-to-point"
         ? parseRouteCoordinateValue(request.destinationLocation)
         : undefined;
-
-    if (!container) {
-      return;
-    }
-
-    delete (container as HTMLDivElement & { _leaflet_id?: number })._leaflet_id;
-
-    const map = L.map(container, {
-      zoomControl: true,
-      attributionControl: true,
-      scrollWheelZoom: false
-    });
-
-    const tileLayer = ROUTE_TILE_LAYERS[mapLayer];
-    L.tileLayer(tileLayer.url, {
-      maxZoom: tileLayer.maxZoom,
-      attribution: tileLayer.attribution,
-      ...(tileLayer.subdomains ? { subdomains: tileLayer.subdomains } : {})
-    }).addTo(map);
-
     const boundsPoints: Array<[number, number]> = [];
 
     if (routePoints && routePoints.length >= 2) {
@@ -2341,24 +3171,21 @@ function RoutePreviewMap({
         opacity: 0.95,
         lineCap: "round",
         lineJoin: "round"
-      }).addTo(map);
-
+      }).addTo(overlay);
       L.circleMarker(routePoints[0]!, {
         radius: 6,
         color: "#4da3ff",
         fillColor: "#4da3ff",
         fillOpacity: 1,
         weight: 2
-      }).addTo(map);
-
+      }).addTo(overlay);
       L.circleMarker(routePoints[routePoints.length - 1]!, {
         radius: 6,
         color: "#d89b22",
         fillColor: "#d89b22",
         fillOpacity: 1,
         weight: 2
-      }).addTo(map);
-
+      }).addTo(overlay);
       boundsPoints.push(...routePoints);
     }
 
@@ -2371,7 +3198,7 @@ function RoutePreviewMap({
         weight: 2
       })
         .bindTooltip("Pinned start")
-        .addTo(map);
+        .addTo(overlay);
       boundsPoints.push([startPin.lat, startPin.lon]);
     }
 
@@ -2384,7 +3211,7 @@ function RoutePreviewMap({
         weight: 2
       })
         .bindTooltip("Pinned end")
-        .addTo(map);
+        .addTo(overlay);
       boundsPoints.push([destinationPin.lat, destinationPin.lon]);
     }
 
@@ -2397,47 +3224,29 @@ function RoutePreviewMap({
         weight: 3
       })
         .bindTooltip("Current location")
-        .addTo(map);
+        .addTo(overlay);
       boundsPoints.push([currentLocation.lat, currentLocation.lon]);
     }
 
-    if (boundsPoints.length > 0) {
+    // Auto-fit only when a new route appears or the user taps "Fit route";
+    // otherwise leave the user's current pan/zoom untouched.
+    const fitRequested = fitRequestId !== lastFitRequestId.current;
+    const routeChanged = route !== lastRouteRef.current;
+    lastFitRequestId.current = fitRequestId;
+    lastRouteRef.current = route;
+    if (boundsPoints.length > 0 && (fitRequested || routeChanged)) {
       map.fitBounds(L.latLngBounds(boundsPoints), {
         padding: [28, 28],
         maxZoom: 14
       });
-    } else {
-      map.setView([39.5, -98.35], 4);
     }
-
-    if (pinMode) {
-      map.on("click", (event: L.LeafletMouseEvent) => {
-        onPickPoint({
-          lat: event.latlng.lat,
-          lon: event.latlng.lng
-        });
-      });
-    }
-
-    const resizeObserver = new ResizeObserver(() => {
-      map.invalidateSize();
-    });
-    resizeObserver.observe(container);
-
-    return () => {
-      resizeObserver.disconnect();
-      map.remove();
-    };
   }, [
     route,
     request.startLocation,
     request.destinationLocation,
     request.mode,
     currentLocation,
-    mapLayer,
-    fitRequestId,
-    pinMode,
-    onPickPoint
+    fitRequestId
   ]);
 
   return (
@@ -2463,6 +3272,7 @@ function getRouteReadiness(
   hasUnsavedApiKeyChange: boolean
 ): { ready: boolean; items: RouteReadinessItem[] } {
   const distance = Number(request.distanceKm);
+  const maxDistance = maxDistanceForActivity(request.activityType);
   const items: RouteReadinessItem[] = [
     {
       label: hasUnsavedApiKeyChange ? "Save key change" : "API key saved",
@@ -2474,7 +3284,8 @@ function getRouteReadiness(
     },
     {
       label: "Distance valid",
-      ready: Number.isFinite(distance) && distance > 0 && distance <= 100
+      ready:
+        Number.isFinite(distance) && distance > 0 && distance <= maxDistance
     }
   ];
 
@@ -2533,17 +3344,6 @@ function requestCurrentPosition(
   return new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(resolve, reject, options);
   });
-}
-
-function routeMapLayerLabel(layer: RouteMapLayer): string {
-  switch (layer) {
-    case "street":
-      return "Street";
-    case "dark":
-      return "Dark";
-    case "topo":
-      return "Topo-like";
-  }
 }
 
 function setRequestField<Key extends keyof GenerateRouteRequest>(
@@ -2640,10 +3440,197 @@ function routeModeLabel(mode: GenerateRouteRequest["mode"]): string {
   return mode === "point-to-point" ? "Point-to-point" : "Loop";
 }
 
-function surfacePreferenceLabel(
-  surface: GenerateRouteRequest["surfacePreference"]
-): string {
-  return surface === "trail" ? "Trail / hiking" : "Road / walking";
+/**
+ * Moving time for the route. ORS routes "running" on its walking profile, so its
+ * duration is a *walking* time — useless as a running estimate. For running we
+ * model a realistic time (flat pace + a climbing penalty); other sports use the
+ * profile-appropriate duration ORS returns.
+ */
+function effectiveRouteDuration(
+  route: GeneratedRoute,
+  baseline: ActivityPaceBaseline | undefined
+): {
+  seconds: number | undefined;
+  estimated: boolean;
+  fromHistory: boolean;
+} {
+  const distanceKm = route.distanceMeters / 1000;
+  const climbSeconds =
+    (route.ascentMeters ?? 0) *
+    (isCyclingActivity(route.activityType) ? 4 : 6); // s per metre climbed
+
+  // Personalised: use the user's median pace for *this* sport when we have it.
+  if (baseline && distanceKm > 0) {
+    return {
+      seconds: Math.round(baseline.secondsPerKm * distanceKm + climbSeconds),
+      estimated: true,
+      fromHistory: true
+    };
+  }
+
+  // No history for this sport: ORS routes "running" on its walking profile, so
+  // its duration is too slow — fall back to a generic 6:00 /km running model.
+  if (route.activityType === "running" && distanceKm > 0) {
+    return {
+      seconds: Math.round(360 * distanceKm + climbSeconds),
+      estimated: true,
+      fromHistory: false
+    };
+  }
+
+  // Walking/hiking/cycling without history use the profile-correct ORS duration.
+  return {
+    seconds: route.durationSeconds,
+    estimated: false,
+    fromHistory: false
+  };
+}
+
+/** Average pace (min/km) for foot sports, or average speed (km/h) for cycling. */
+function formatPaceOrSpeed(
+  route: GeneratedRoute,
+  durationSeconds: number | undefined
+): string | null {
+  const distanceKm = route.distanceMeters / 1000;
+  if (!durationSeconds || durationSeconds <= 0 || distanceKm <= 0) {
+    return null;
+  }
+
+  if (isCyclingActivity(route.activityType)) {
+    const speed = distanceKm / (durationSeconds / 3600);
+    return `${speed.toFixed(1)} km/h`;
+  }
+
+  const secondsPerKm = durationSeconds / distanceKm;
+  const minutes = Math.floor(secondsPerKm / 60);
+  const seconds = Math.round(secondsPerKm % 60);
+  const normalizedMinutes = seconds === 60 ? minutes + 1 : minutes;
+  const normalizedSeconds = seconds === 60 ? 0 : seconds;
+  return `${normalizedMinutes}:${String(normalizedSeconds).padStart(2, "0")} /km`;
+}
+
+/** Ascent per kilometre — a robust hilliness measure. */
+function climbRatePerKm(route: GeneratedRoute): number | undefined {
+  const distanceKm = route.distanceMeters / 1000;
+  if (distanceKm <= 0 || route.ascentMeters === undefined) {
+    return undefined;
+  }
+  return route.ascentMeters / distanceKm;
+}
+
+function difficultyFromClimbRate(metersPerKm: number): string {
+  if (metersPerKm < 10) return "Flat";
+  if (metersPerKm < 25) return "Rolling";
+  if (metersPerKm < 50) return "Hilly";
+  return "Steep";
+}
+
+/**
+ * Builds an SVG elevation profile (elevation vs. cumulative distance) normalized
+ * to a 100×32 viewBox. Returns null when there isn't enough variation to plot.
+ */
+function buildElevationProfile(points: GeneratedRoute["points"]):
+  | { linePoints: string; areaPoints: string; minEle: number; maxEle: number }
+  | null {
+  const valid = points.filter(
+    (point) =>
+      point.lat !== undefined &&
+      point.lon !== undefined &&
+      point.elevation !== undefined
+  );
+  if (valid.length < 2) {
+    return null;
+  }
+
+  const distances = [0];
+  for (let index = 1; index < valid.length; index += 1) {
+    const previous = valid[index - 1]!;
+    const current = valid[index]!;
+    distances.push(
+      distances[index - 1]! +
+        haversineMeters(
+          previous.lat!,
+          previous.lon!,
+          current.lat!,
+          current.lon!
+        )
+    );
+  }
+
+  const total = distances[distances.length - 1]!;
+  const elevations = valid.map((point) => point.elevation as number);
+  const minEle = Math.min(...elevations);
+  const maxEle = Math.max(...elevations);
+  if (total <= 0 || maxEle - minEle < 2) {
+    return null;
+  }
+
+  const range = maxEle - minEle;
+  const linePoints = valid
+    .map((point, index) => {
+      const x = (distances[index]! / total) * 100;
+      const y = 31 - ((point.elevation! - minEle) / range) * 30;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(" ");
+
+  return {
+    linePoints,
+    areaPoints: `0,32 ${linePoints} 100,32`,
+    minEle,
+    maxEle
+  };
+}
+
+function haversineMeters(
+  aLat: number,
+  aLon: number,
+  bLat: number,
+  bLon: number
+): number {
+  const radius = 6_371_000;
+  const toRad = Math.PI / 180;
+  const dLat = (bLat - aLat) * toRad;
+  const dLon = (bLon - aLon) * toRad;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(aLat * toRad) * Math.cos(bLat * toRad) * Math.sin(dLon / 2) ** 2;
+  return 2 * radius * Math.asin(Math.sqrt(h));
+}
+
+const ROUTE_ACTIVITY_OPTIONS: Array<{
+  value: RouteActivityType;
+  label: string;
+}> = [
+  { value: "running", label: "Running" },
+  { value: "walking", label: "Walking" },
+  { value: "hiking", label: "Hiking" },
+  { value: "cycling-road", label: "Road cycling" },
+  { value: "cycling-mountain", label: "Mountain biking" }
+];
+
+function activityTypeLabel(activityType: RouteActivityType): string {
+  return (
+    ROUTE_ACTIVITY_OPTIONS.find((option) => option.value === activityType)
+      ?.label ?? activityType
+  );
+}
+
+function isCyclingActivity(activityType: RouteActivityType): boolean {
+  return activityType.startsWith("cycling");
+}
+
+/** Keeps the legacy surface field consistent with the chosen sport. */
+function surfaceForActivity(
+  activityType: RouteActivityType
+): GenerateRouteRequest["surfacePreference"] {
+  return activityType === "hiking" || activityType === "cycling-mountain"
+    ? "trail"
+    : "road";
+}
+
+function maxDistanceForActivity(activityType: RouteActivityType): number {
+  return isCyclingActivity(activityType) ? 300 : 100;
 }
 
 function formatElevationPreference(
@@ -2657,6 +3644,27 @@ function formatElevationPreference(
     case "any":
       return "Any elevation";
   }
+}
+
+function reportInstallOutcome(
+  error: unknown,
+  onMessage: (message: string | null) => void,
+  onError: (message: string | null) => void
+): void {
+  if (isInstallTransferCancelled(error)) {
+    onError(null);
+    onMessage("Transfer cancelled.");
+    return;
+  }
+
+  onError(toErrorMessage(error));
+}
+
+function isInstallTransferCancelled(error: unknown): boolean {
+  const message = toErrorMessage(error);
+  return (
+    message === "Transfer cancelled." || message.includes("Transfer cancelled.")
+  );
 }
 
 function toErrorMessage(error: unknown): string {

@@ -12,8 +12,11 @@ import type {
   GenerateRouteRequest,
   GeneratedRoute,
   LocalTrack,
+  RouteApiKeyValidation,
   RouteBuilderConfig,
   RouteGeocodeResult,
+  ActivityPaceBaselines,
+  RouteShareSession,
   SpotifyConfig,
   SpotifyPlaylist,
   SpotifyPlaylistTrack,
@@ -115,6 +118,7 @@ export interface CorosLinkApi {
   getTrainingDashboard: () => Promise<TrainingHubDashboard>;
   getDailyMetrics: (dateList: string[]) => Promise<TrainingHubDailyMetrics>;
   getSportTypeMap: () => Promise<TrainingHubSportType[]>;
+  getActivityPaceBaselines: () => Promise<ActivityPaceBaselines>;
   getUpcomingWorkouts: (days?: number) => Promise<TrainingHubUpcomingWorkout[]>;
   getCorosMapManifest: () => Promise<CorosMapManifest>;
   openCorosMapDownload: (downloadUrl: string) => Promise<void>;
@@ -129,10 +133,14 @@ export interface CorosLinkApi {
   ) => () => void;
   listCachedCorosMaps: () => Promise<CachedCorosMapPackage[]>;
   getCorosMapInstallProgress: () => Promise<CorosMapInstallProgress | null>;
+  cancelCorosMapInstall: () => Promise<CorosMapInstallProgress | null>;
   onCorosMapInstallProgressUpdate: (
     callback: (progress: CorosMapInstallProgress | null) => void
   ) => () => void;
   installCachedCorosMap: (packageId: string) => Promise<CorosMapInstallResult>;
+  installCachedCorosMaps: (
+    packageIds: string[]
+  ) => Promise<CorosMapInstallResult>;
   deleteCachedCorosMap: (
     packageId: string
   ) => Promise<CachedCorosMapPackage[]>;
@@ -150,6 +158,10 @@ export interface CorosLinkApi {
   geocodeRouteLocation: (query: string) => Promise<RouteGeocodeResult>;
   generateRoute: (request: GenerateRouteRequest) => Promise<GeneratedRoute>;
   exportGeneratedRoute: (id: string) => Promise<string | null>;
+  deleteGeneratedRoute: (id: string) => Promise<boolean>;
+  startRouteShare: (id: string) => Promise<RouteShareSession>;
+  stopRouteShare: () => Promise<void>;
+  validateRouteApiKey: (apiKey: string) => Promise<RouteApiKeyValidation>;
   getAppUpdateStatus: () => Promise<AppUpdateSnapshot>;
   checkForAppUpdates: () => Promise<AppUpdateSnapshot>;
   quitAndInstallUpdate: () => Promise<{ installMethod: "restart" | "manual" }>;

@@ -224,7 +224,8 @@ export type CorosMapInstallPhase =
   | "preparing"
   | "copying"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export interface CorosMapInstallProgress {
   active: boolean;
@@ -244,9 +245,44 @@ export interface CorosMapInstallProgress {
 export type RouteMode = "loop" | "point-to-point";
 export type RouteSurfacePreference = "road" | "trail";
 export type RouteElevationPreference = "any" | "flatter" | "hilly";
+export type RouteActivityType =
+  | "walking"
+  | "running"
+  | "hiking"
+  | "cycling-road"
+  | "cycling-mountain";
 
 export interface RouteBuilderConfig {
   openRouteServiceApiKey: string;
+}
+
+export interface RouteApiKeyValidation {
+  status: "valid" | "invalid" | "quota" | "error" | "empty";
+  message: string;
+}
+
+export interface ActivityPaceBaseline {
+  /** Typical (median) pace in seconds per kilometre for a sport. */
+  secondsPerKm: number;
+  /** Number of stored activities the pace was derived from. */
+  sampleSize: number;
+}
+
+/** Personal pace baselines keyed by route activity type (only sports with data). */
+export type ActivityPaceBaselines = Partial<
+  Record<RouteActivityType, ActivityPaceBaseline>
+>;
+
+export interface RouteShareSession {
+  /** Full LAN URL the QR encodes; the phone fetches the GPX from here. */
+  url: string;
+  /** PNG data URL of the QR code for the share URL. */
+  qrDataUrl: string;
+  fileName: string;
+  /** LAN IP the GPX is served from (shown for troubleshooting). */
+  lanAddress: string;
+  /** ISO timestamp when the share link auto-expires. */
+  expiresAt: string;
 }
 
 export interface RouteGeocodeResult {
@@ -260,9 +296,16 @@ export interface GenerateRouteRequest {
   destinationLocation?: string;
   distanceKm: number;
   mode: RouteMode;
+  activityType: RouteActivityType;
   surfacePreference: RouteSurfacePreference;
   avoidHighways: boolean;
   elevationPreference: RouteElevationPreference;
+  /**
+   * Optional nudge used only for loop routes. Changing it produces a different
+   * loop for the same inputs (powers the "Regenerate" control). Absent keeps the
+   * deterministic default behaviour.
+   */
+  variationSeed?: number;
 }
 
 export interface GeneratedRoute {
@@ -276,6 +319,7 @@ export interface GeneratedRoute {
   ascentMeters?: number;
   descentMeters?: number;
   mode: RouteMode;
+  activityType: RouteActivityType;
   surfacePreference: RouteSurfacePreference;
   avoidHighways: boolean;
   elevationPreference: RouteElevationPreference;

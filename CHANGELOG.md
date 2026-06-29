@@ -5,6 +5,23 @@ All notable changes to CorosLink are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.10] - 2026-06-29
+
+### Added
+
+- **Maps (BETA)** — browse official COROS v5 map regions, download/cache packages locally, and install to the watch over USB with live copy progress
+- **Route builder** — generate loop or point-to-point GPX routes via OpenRouteService with interactive map preview, route stats, GPX export, and **Share to phone** (QR + local HTTP hand-off)
+- **Batch map transfer** — select multiple cached maps and install them in one job with a single continuous progress bar
+- **Cancel map transfer** — stop an in-progress watch map install; files already copied remain on the watch
+- **Activity pace baselines** from stored Training Hub activities for route time estimates
+- Local persistence of Training Hub activities in SQLite for offline analytics
+- Weekly activity aggregation and expanded daily metrics parsing for Training Hub charts
+
+### Changed
+
+- README and overview copy now describe CorosLink as a COROS watch companion (not Pace Pro–only) with Maps and Route builder screenshots
+- Training Hub fitness trend, heatmap, and scores panel polish
+
 ## [0.1.9] - 2026-06-28
 
 ### Changed
@@ -95,6 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - GitHub Actions release workflow and installer build documentation
 
+[0.1.10]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.6...v0.1.7

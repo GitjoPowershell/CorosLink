@@ -5,7 +5,7 @@
 <h1 align="center">CorosLink</h1>
 
 <p align="center">
-  <em>Your Pace Pro companion — media, watch sync, and training analytics in one desktop app.</em>
+  <em>Your COROS watch companion — media, maps, and training analytics on desktop.</em>
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  Unofficial desktop app for COROS Pace Pro owners. Not affiliated with or endorsed by COROS.
+  Unofficial desktop app for COROS watch owners. Not affiliated with or endorsed by COROS.
 </p>
 
 <p align="center">
@@ -31,14 +31,14 @@
 </p>
 
 <p align="center">
-  <img src="public/assets/pace-pro-hero.webp" alt="COROS Pace Pro" width="420" />
+  <img src="public/assets/pace-pro-hero.webp" alt="COROS watch" width="420" />
 </p>
 
 ---
 
 ## Overview
 
-CorosLink brings music management and training analytics together for your **COROS Pace Pro**. Connect your watch over USB, download MP3s from YouTube or Spotify playlists, transfer tracks in one click, and explore your training data in a rich dashboard — all from your Mac, PC, or Linux desktop.
+CorosLink brings music management, watch maps, route planning, and training analytics together for your **COROS watch**. Connect over USB to sync MP3s and map packages, download music from YouTube or Spotify playlists, build GPX routes on your desktop, and explore your training data in a rich dashboard — all from your Mac, PC, or Linux machine.
 
 ---
 
@@ -46,10 +46,11 @@ CorosLink brings music management and training analytics together for your **COR
 
 ### Overview — Dashboard at a glance
 
-Your home screen for watch status, library metrics, and quick actions. See everything about your Pace Pro in one place.
+Your home screen for watch status, library metrics, and quick actions. See everything about your connected COROS watch in one place.
 
-- **Time-of-day greeting** with a Pace Pro hero image and live connection status
-- **Storage ring** showing used space, free space, and 32 GB capacity
+- **Watch-aware dashboard** — detects your connected COROS watch and shows model-specific storage capacity
+- **Time-of-day greeting** with a watch hero image and live connection status
+- **Storage ring** showing used space, free space, and total capacity for your model (4 GB or 32 GB)
 - **Metric tiles** for local library count, tracks on watch, transferred count, and library size
 - **Quick actions** to jump into YouTube browsing or Spotify sync
 - **Paste-a-link download** with optional auto-transfer to your watch
@@ -105,6 +106,42 @@ Sync your Spotify playlists to MP3s and your watch.
 
 ---
 
+### Maps — Watch maps and routes (BETA)
+
+Download official COROS map regions and build custom GPX routes from your desktop.
+
+#### Official map packages
+
+Browse, cache, and install COROS map data to your watch over USB.
+
+- **Browse official map regions** (Landscape and Topo) from the COROS v5 manifest
+- **Search and filter** regions; download and cache packages locally
+- **Watch storage panel** — maps vs other usage and free space at a glance
+- **Install to watch** over USB with live copy progress
+- **Choose a local map folder** for cached packages on your computer
+
+<p align="center">
+  <img src="docs/screenshots/map.png" alt="COROS map packages and watch install" width="900" />
+</p>
+
+#### Route builder
+
+Generate GPX routes and send them to your phone for import into the COROS app.
+
+- **Generate loop or point-to-point routes** with an OpenRouteService API key
+- **Sport presets** — running, walking, hiking, road cycling, and mountain biking — plus elevation preference
+- **Interactive map preview** with start pin, fit route, and layer themes
+- **Route stats** — distance, estimated time and pace, ascent/descent, and elevation profile
+- **Export GPX** and **Share to phone** (QR) for import into the COROS mobile app's route library
+
+Direct cloud upload to your COROS account is not wired yet; GPX export via the phone app is the supported path today.
+
+<p align="center">
+  <img src="docs/screenshots/route-generator.png" alt="Route builder with map preview and GPX export" width="900" />
+</p>
+
+---
+
 ### Training Hub — COROS analytics dashboard
 
 Log in with your COROS account to view training data, fitness scores, and race predictions — right on your desktop.
@@ -126,20 +163,29 @@ Log in with your COROS account to view training data, fitness scores, and race p
 
 ## How it works
 
-CorosLink uses two independent data paths — USB for music, COROS APIs for training.
+CorosLink uses independent data paths — USB for watch files, OpenRouteService for routes, and COROS APIs for training.
 
 ```mermaid
 flowchart LR
   YouTube --> ytDlp[yt-dlp + ffmpeg]
   Spotify --> ytDlp
   ytDlp --> SQLite[(Local SQLite)]
-  SQLite --> USB[USB Music folder]
-  USB --> Watch[COROS Pace Pro]
+  SQLite --> USBMusic[USB Music folder]
+  MapCDN[map-oss-us.coros.com] --> MapCache[Local map cache]
+  MapCache --> USBMaps[USB map folder]
+  ORS[OpenRouteService] --> GPX[GPX export]
+  USBMusic --> Watch[COROS watch]
+  USBMaps --> Watch
+  GPX --> PhoneApp[COROS phone app]
   COROSAccount[COROS account] --> TeamAPI[teamapi.coros.com]
   TeamAPI --> Dashboard[Training Hub]
 ```
 
 **Music sync** does not use an official COROS SDK. The app detects your watch when it mounts as a USB drive with a `Music` folder, then copies MP3 files directly.
+
+**Map install** downloads official packages from COROS map servers, caches them locally, and copies them to your watch's map folder over USB.
+
+**Route builder** calls OpenRouteService to generate a route, then exports GPX for import through the COROS phone app (Bluetooth sync to the watch).
 
 **Training Hub** authenticates with COROS team APIs to fetch your analytics, activities, and fitness scores. Credentials are sent to COROS servers at login; all other app data stays on your machine.
 
@@ -198,8 +244,9 @@ Installers are written to `release/`.
 ### Requirements
 
 - **macOS**, **Windows**, or **Linux**
-- **USB cable** to connect your Pace Pro for music sync
+- **USB cable** to connect your COROS watch for music and map sync
 - **yt-dlp** and **ffmpeg** — bundled in packaged builds; falls back to `PATH` if missing
+- **OpenRouteService API key** (optional) — only needed for Route Builder
 - **Spotify Developer app** (optional) — only needed for Spotify playlist sync
 - **COROS account** (optional) — only needed for Training Hub
 
@@ -209,6 +256,8 @@ Installers are written to `release/`.
 
 - **Music and downloads** — stored locally in the Electron user data directory (SQLite database + MP3 files on disk)
 - **Spotify tokens** — stored locally in SQLite after OAuth; never sent anywhere except Spotify
+- **Map cache** — downloaded map packages are stored in a local folder you choose; copied to the watch over USB only
+- **OpenRouteService** — route requests are sent to OpenRouteService when you generate a route (your API key is stored locally)
 - **Training Hub** — your COROS email and password are used to authenticate with COROS servers. Activity data is fetched on demand and not synced to any third-party service
 - **No cloud sync** — the app does not run its own backend or upload your files
 
@@ -228,7 +277,7 @@ npm run binaries:prepare
 npm run dev
 ```
 
-The dev command starts Vite at `http://127.0.0.1:5173/` and launches Electron. `npm run rebuild` prepares native SQLite bindings for Electron. `npm run dev` automatically runs `binaries:prepare` before Electron starts, downloading the pinned `yt-dlp` release and copying the `ffmpeg-static` binary into `bin/<platform>-<arch>/`. You can also run `npm run binaries:prepare` manually if you only need to refresh media tools.
+The dev command starts Vite at `http://127.0.0.1:5173/` and launches Electron. `npm run rebuild` prepares native SQLite bindings for Electron. `npm run dev` automatically runs `binaries:prepare` before Electron starts, downloading the pinned `yt-dlp` release and copying the `ffmpeg-static` binary into `bin/<platform>-<arch>/`. You can also run `binaries:prepare` manually if you only need to refresh media tools.
 
 To prepare Windows x64 media binaries from any platform:
 

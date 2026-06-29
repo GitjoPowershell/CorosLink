@@ -1,6 +1,15 @@
 import crypto from "node:crypto";
-import { deleteSettings, getSetting, setSetting } from "./database";
+import {
+  deleteSettings,
+  getSetting,
+  listStoredTrainingActivities,
+  setSetting,
+  upsertTrainingActivities
+} from "./database";
 import type {
+  ActivityPaceBaseline,
+  ActivityPaceBaselines,
+  RouteActivityType,
   TrainingHubActivity,
   TrainingHubActivityDetail,
   TrainingHubActivityFileType,
@@ -341,7 +350,15 @@ export async function listTrainingHubActivities(
     }
   );
 
-  return (data.dataList ?? []).map(mapTrainingHubActivity);
+  const activities = (data.dataList ?? []).map(mapTrainingHubActivity);
+  // Persist a local copy so analytics (e.g. personal pace) work offline and
+  // across sessions without re-fetching from COROS.
+  try {
+    upsertTrainingActivities(activities);
+  } catch {
+    // Storage is best-effort; never block the activity list on it.
+  }
+  return activities;
 }
 
 export async function getTrainingHubActivityDetail(
@@ -467,6 +484,137 @@ export async function getSportTypeMap(): Promise<TrainingHubSportType[]> {
   }
 }
 
+// Each route sport maps to a COROS activity category so we compare like-for-like
+// (a running route uses your runs, a bike route uses your rides, etc.).
+type PaceCategory = "run" | "walk" | "hike" | "bike";
+
+const CATEGORY_FOR_ACTIVITY: Record<RouteActivityType, PaceCategory> = {
+  running: "run",
+  walking: "walk",
+  hiking: "hike",
+  "cycling-road": "bike",
+  "cycling-mountain": "bike"
+};
+
+// Substrings matched against the COROS sport name (lower-cased), in priority order.
+const CATEGORY_KEYWORDS: Record<PaceCategory, string[]> = {
+  run: ["run"],
+  bike: ["bike", "cycl", "ride"],
+  hike: ["hik"],
+  walk: ["walk"]
+};
+
+// Plausible pace band per category in seconds/km — drops GPS junk and the rare
+// mislabelled activity that slips through the name match.
+const CATEGORY_PACE_BAND: Record<PaceCategory, [number, number]> = {
+  run: [180, 720], // 3:00–12:00 /km
+  walk: [540, 1500], // 9:00–25:00 /km
+  hike: [480, 1800], // 8:00–30:00 /km
+  bike: [60, 400] // ~9–60 km/h
+};
+
+const MIN_ACTIVITY_DISTANCE_METERS = 1000;
+const MIN_PACE_SAMPLES = 3;
+
+function categorizeSportName(name: string): PaceCategory | null {
+  const lower = name.toLowerCase();
+  for (const category of ["run", "bike", "hike", "walk"] as PaceCategory[]) {
+    if (CATEGORY_KEYWORDS[category].some((keyword) => lower.includes(keyword))) {
+      return category;
+    }
+  }
+  return null;
+}
+
+function median(values: number[]): number | undefined {
+  if (values.length === 0) {
+    return undefined;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+/**
+ * Derives per-sport median pace from stored COROS activities so route time
+ * estimates reflect *your* running/walking/hiking/cycling pace. Sports without
+ * enough matching activities are omitted, so callers fall back to a default.
+ */
+export async function getActivityPaceBaselines(): Promise<ActivityPaceBaselines> {
+  let activities = listStoredTrainingActivities();
+  // Seed the local store from COROS on first use if the user is logged in.
+  if (activities.length < 5 && getStoredAuth()) {
+    try {
+      await listTrainingHubActivities(1, 50);
+      activities = listStoredTrainingActivities();
+    } catch {
+      // Offline or not authorised — fall back to whatever is stored.
+    }
+  }
+  if (activities.length === 0) {
+    return {};
+  }
+
+  // Resolve sport type → name; the activity list doesn't carry names itself.
+  const sportNames = new Map<number, string>();
+  try {
+    for (const sport of await getSportTypeMap()) {
+      sportNames.set(sport.sportType, sport.sportName);
+    }
+  } catch {
+    // Without names we can't tell runs from walks, so bail to safe defaults.
+  }
+
+  const pacesByCategory: Record<PaceCategory, number[]> = {
+    run: [],
+    walk: [],
+    hike: [],
+    bike: []
+  };
+
+  for (const activity of activities) {
+    const distance = activity.distance ?? 0;
+    const duration = activity.duration ?? 0;
+    if (distance < MIN_ACTIVITY_DISTANCE_METERS || duration <= 0) {
+      continue;
+    }
+    const name = activity.sportName ?? sportNames.get(activity.sportType) ?? "";
+    const category = categorizeSportName(name);
+    if (!category) {
+      continue;
+    }
+    const pace = duration / (distance / 1000);
+    const [min, max] = CATEGORY_PACE_BAND[category];
+    if (pace < min || pace > max) {
+      continue;
+    }
+    pacesByCategory[category].push(pace);
+  }
+
+  const baselineByCategory: Partial<Record<PaceCategory, ActivityPaceBaseline>> =
+    {};
+  for (const category of Object.keys(pacesByCategory) as PaceCategory[]) {
+    const samples = pacesByCategory[category];
+    const value = median(samples);
+    if (value !== undefined && samples.length >= MIN_PACE_SAMPLES) {
+      baselineByCategory[category] = {
+        secondsPerKm: Math.round(value),
+        sampleSize: samples.length
+      };
+    }
+  }
+
+  const result: ActivityPaceBaselines = {};
+  for (const activityType of Object.keys(
+    CATEGORY_FOR_ACTIVITY
+  ) as RouteActivityType[]) {
+    const baseline = baselineByCategory[CATEGORY_FOR_ACTIVITY[activityType]];
+    if (baseline) {
+      result[activityType] = baseline;
+    }
+  }
+  return result;
+}
+
 export async function getUpcomingWorkouts(
   days = 14
 ): Promise<TrainingHubUpcomingWorkout[]> {
@@ -481,6 +629,40 @@ export async function getUpcomingWorkouts(
   );
 
   return parseUpcomingWorkouts(raw, startDay);
+}
+
+/**
+ * GROUNDWORK (not yet wired to the UI): push a generated route to the user's
+ * COROS account so it syncs to the watch through the COROS phone app over
+ * Bluetooth — the only viable one-click path from the desktop, since COROS
+ * watches do not import routes over USB.
+ *
+ * This reuses the existing Training Hub session via `trainingHubRequest`
+ * (handles token, region base-URL failover, and re-auth), so the only missing
+ * piece is the actual COROS route/course upload endpoint + payload, which is
+ * undocumented.
+ *
+ * To finish it, capture the request the COROS web app makes:
+ *   1. Log into web.coros.com and open DevTools → Network.
+ *   2. Import a GPX route (or create one) and watch for the upload request.
+ *   3. Note the path (likely under `/route` / `/course` / `/nav`), HTTP method,
+ *      and body shape (JSON vs. multipart form-data with the GPX/`.kml`).
+ * Then replace the placeholder below with that path/body and remove the throw.
+ */
+export async function uploadRouteToCorosAccount(
+  _name: string,
+  _gpx: string
+): Promise<void> {
+  // Example of the intended call once the endpoint is known:
+  //
+  //   await trainingHubRequest<{ result: string }>("/route/import", {
+  //     method: "POST",
+  //     body: JSON.stringify({ name: _name, fileType: "gpx", content: _gpx })
+  //   });
+  //
+  throw new Error(
+    "Uploading routes to your COROS account is not available yet. Export the GPX and import it in the COROS phone app for now."
+  );
 }
 
 function upcomingScheduleDateRange(days: number): {

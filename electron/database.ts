@@ -9,6 +9,7 @@ import type {
   LocalTrack,
   SpotifySyncTrack,
   SpotifySyncTrackStatus,
+  TrainingHubActivity,
   YouTubeHistoryEntry,
   YouTubeHistoryEntryType
 } from "./types";
@@ -62,12 +63,29 @@ interface GeneratedRouteRow {
   ascent_meters: number | null;
   descent_meters: number | null;
   mode: GeneratedRoute["mode"];
+  activity_type: string | null;
   surface_preference: GeneratedRoute["surfacePreference"];
   avoid_highways: number;
   elevation_preference: GeneratedRoute["elevationPreference"];
   points_json: string;
   bounds_json: string | null;
   gpx_path: string | null;
+}
+
+interface TrainingActivityRow {
+  activity_id: string;
+  name: string | null;
+  sport_type: number;
+  sport_name: string | null;
+  start_time: number | null;
+  end_time: number | null;
+  duration: number | null;
+  distance: number | null;
+  avg_hr: number | null;
+  max_hr: number | null;
+  calories: number | null;
+  training_load: number | null;
+  elevation_gain: number | null;
 }
 
 interface CachedCorosMapRow {
@@ -172,7 +190,25 @@ export function initializeDatabase(userDataPath: string): Database.Database {
       elevation_preference TEXT NOT NULL,
       points_json TEXT NOT NULL,
       bounds_json TEXT,
-      gpx_path TEXT
+      gpx_path TEXT,
+      activity_type TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS training_activities (
+      activity_id TEXT PRIMARY KEY,
+      name TEXT,
+      sport_type INTEGER NOT NULL,
+      sport_name TEXT,
+      start_time INTEGER,
+      end_time INTEGER,
+      duration INTEGER,
+      distance REAL,
+      avg_hr INTEGER,
+      max_hr INTEGER,
+      calories INTEGER,
+      training_load REAL,
+      elevation_gain REAL,
+      synced_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS cached_coros_maps (
@@ -189,7 +225,24 @@ export function initializeDatabase(userDataPath: string): Database.Database {
     );
   `);
 
+  ensureColumn(db, "generated_routes", "activity_type", "TEXT");
+
   return db;
+}
+
+function ensureColumn(
+  database: Database.Database,
+  table: string,
+  column: string,
+  definition: string
+): void {
+  const columns = database
+    .prepare(`PRAGMA table_info(${table})`)
+    .all() as Array<{ name: string }>;
+  if (columns.some((entry) => entry.name === column)) {
+    return;
+  }
+  database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
 function requireDatabase(): Database.Database {
@@ -553,6 +606,9 @@ function toGeneratedRoute(row: GeneratedRouteRow): GeneratedRoute {
     ascentMeters: row.ascent_meters ?? undefined,
     descentMeters: row.descent_meters ?? undefined,
     mode: row.mode,
+    activityType:
+      (row.activity_type as GeneratedRoute["activityType"] | null) ??
+      (row.surface_preference === "trail" ? "hiking" : "walking"),
     surfacePreference: row.surface_preference,
     avoidHighways: Boolean(row.avoid_highways),
     elevationPreference: row.elevation_preference,
@@ -569,8 +625,8 @@ export function listGeneratedRoutes(limit = 20): GeneratedRoute[] {
     .prepare(
       `SELECT id, name, created_at, start_location, destination_location,
               distance_meters, duration_seconds, ascent_meters, descent_meters,
-              mode, surface_preference, avoid_highways, elevation_preference,
-              points_json, bounds_json, gpx_path
+              mode, activity_type, surface_preference, avoid_highways,
+              elevation_preference, points_json, bounds_json, gpx_path
        FROM generated_routes
        ORDER BY created_at DESC
        LIMIT ?`
@@ -585,8 +641,8 @@ export function getGeneratedRoute(id: string): GeneratedRoute | undefined {
     .prepare(
       `SELECT id, name, created_at, start_location, destination_location,
               distance_meters, duration_seconds, ascent_meters, descent_meters,
-              mode, surface_preference, avoid_highways, elevation_preference,
-              points_json, bounds_json, gpx_path
+              mode, activity_type, surface_preference, avoid_highways,
+              elevation_preference, points_json, bounds_json, gpx_path
        FROM generated_routes
        WHERE id = ?`
     )
@@ -601,14 +657,14 @@ export function addGeneratedRoute(route: GeneratedRoute): GeneratedRoute {
       `INSERT INTO generated_routes (
          id, name, created_at, start_location, destination_location,
          distance_meters, duration_seconds, ascent_meters, descent_meters,
-         mode, surface_preference, avoid_highways, elevation_preference,
-         points_json, bounds_json, gpx_path
+         mode, activity_type, surface_preference, avoid_highways,
+         elevation_preference, points_json, bounds_json, gpx_path
        )
        VALUES (
          @id, @name, @createdAt, @startLocation, @destinationLocation,
          @distanceMeters, @durationSeconds, @ascentMeters, @descentMeters,
-         @mode, @surfacePreference, @avoidHighways, @elevationPreference,
-         @pointsJson, @boundsJson, @gpxPath
+         @mode, @activityType, @surfacePreference, @avoidHighways,
+         @elevationPreference, @pointsJson, @boundsJson, @gpxPath
        )`
     )
     .run({
@@ -622,6 +678,7 @@ export function addGeneratedRoute(route: GeneratedRoute): GeneratedRoute {
       ascentMeters: route.ascentMeters ?? null,
       descentMeters: route.descentMeters ?? null,
       mode: route.mode,
+      activityType: route.activityType,
       surfacePreference: route.surfacePreference,
       avoidHighways: route.avoidHighways ? 1 : 0,
       elevationPreference: route.elevationPreference,
@@ -631,6 +688,108 @@ export function addGeneratedRoute(route: GeneratedRoute): GeneratedRoute {
     });
 
   return route;
+}
+
+export function deleteGeneratedRoute(id: string): boolean {
+  const result = requireDatabase()
+    .prepare(`DELETE FROM generated_routes WHERE id = ?`)
+    .run(id);
+  return result.changes > 0;
+}
+
+function toTrainingActivity(row: TrainingActivityRow): TrainingHubActivity {
+  return {
+    activityId: row.activity_id,
+    name: row.name ?? undefined,
+    sportType: row.sport_type,
+    sportName: row.sport_name ?? undefined,
+    startTime: row.start_time ?? undefined,
+    endTime: row.end_time ?? undefined,
+    duration: row.duration ?? undefined,
+    distance: row.distance ?? undefined,
+    avgHr: row.avg_hr ?? undefined,
+    maxHr: row.max_hr ?? undefined,
+    calories: row.calories ?? undefined,
+    trainingLoad: row.training_load ?? undefined,
+    elevationGain: row.elevation_gain ?? undefined
+  };
+}
+
+export function upsertTrainingActivities(
+  activities: TrainingHubActivity[]
+): void {
+  if (activities.length === 0) {
+    return;
+  }
+  const database = requireDatabase();
+  const now = new Date().toISOString();
+  const insert = database.prepare(
+    `INSERT INTO training_activities (
+       activity_id, name, sport_type, sport_name, start_time, end_time,
+       duration, distance, avg_hr, max_hr, calories, training_load,
+       elevation_gain, synced_at
+     )
+     VALUES (
+       @activityId, @name, @sportType, @sportName, @startTime, @endTime,
+       @duration, @distance, @avgHr, @maxHr, @calories, @trainingLoad,
+       @elevationGain, @syncedAt
+     )
+     ON CONFLICT(activity_id) DO UPDATE SET
+       name = excluded.name,
+       sport_type = excluded.sport_type,
+       sport_name = COALESCE(excluded.sport_name, training_activities.sport_name),
+       start_time = excluded.start_time,
+       end_time = excluded.end_time,
+       duration = excluded.duration,
+       distance = excluded.distance,
+       avg_hr = excluded.avg_hr,
+       max_hr = excluded.max_hr,
+       calories = excluded.calories,
+       training_load = excluded.training_load,
+       elevation_gain = excluded.elevation_gain,
+       synced_at = excluded.synced_at`
+  );
+
+  const writeAll = database.transaction((rows: TrainingHubActivity[]) => {
+    for (const activity of rows) {
+      if (!activity.activityId) {
+        continue;
+      }
+      insert.run({
+        activityId: activity.activityId,
+        name: activity.name ?? null,
+        sportType: activity.sportType,
+        sportName: activity.sportName ?? null,
+        startTime: activity.startTime ?? null,
+        endTime: activity.endTime ?? null,
+        duration: activity.duration ?? null,
+        distance: activity.distance ?? null,
+        avgHr: activity.avgHr ?? null,
+        maxHr: activity.maxHr ?? null,
+        calories: activity.calories ?? null,
+        trainingLoad: activity.trainingLoad ?? null,
+        elevationGain: activity.elevationGain ?? null,
+        syncedAt: now
+      });
+    }
+  });
+
+  writeAll(activities);
+}
+
+export function listStoredTrainingActivities(limit = 500): TrainingHubActivity[] {
+  const rows = requireDatabase()
+    .prepare(
+      `SELECT activity_id, name, sport_type, sport_name, start_time, end_time,
+              duration, distance, avg_hr, max_hr, calories, training_load,
+              elevation_gain
+       FROM training_activities
+       ORDER BY start_time DESC
+       LIMIT ?`
+    )
+    .all(limit) as TrainingActivityRow[];
+
+  return rows.map(toTrainingActivity);
 }
 
 function toCachedCorosMap(row: CachedCorosMapRow): CachedCorosMapPackage {

@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   addGeneratedRoute,
   deleteCachedCorosMapRecord,
+  deleteGeneratedRoute as deleteSavedGeneratedRoute,
   getCachedCorosMap,
   getGeneratedRoute,
   getSetting,
@@ -26,6 +27,8 @@ import type {
   CorosMapType,
   GenerateRouteRequest,
   GeneratedRoute,
+  RouteActivityType,
+  RouteApiKeyValidation,
   RouteGeocodeResult,
   RouteBuilderConfig,
   TrainingHubTrackPoint
@@ -36,8 +39,28 @@ const COROS_MAP_HOST = "https://map-oss-us.coros.com";
 const COROS_MAP_MANIFEST_URL = `${COROS_MAP_HOST}/regionMap/v5/regions_v5.json`;
 const ORS_API_KEY_SETTING = "maps.openRouteServiceApiKey";
 const ORS_BASE_URL = "https://api.openrouteservice.org";
-const MAX_ROUTE_DISTANCE_KM = 100;
+const MAX_FOOT_ROUTE_DISTANCE_KM = 100;
+const MAX_CYCLING_ROUTE_DISTANCE_KM = 300;
 const DOWNLOAD_PROGRESS_MIN_INTERVAL_MS = 250;
+
+/** Maps a user-facing activity to an OpenRouteService routing profile. */
+const ORS_PROFILE_BY_ACTIVITY: Record<RouteActivityType, string> = {
+  walking: "foot-walking",
+  running: "foot-walking",
+  hiking: "foot-hiking",
+  "cycling-road": "cycling-road",
+  "cycling-mountain": "cycling-mountain"
+};
+
+function isCyclingActivity(activityType: RouteActivityType): boolean {
+  return activityType.startsWith("cycling");
+}
+
+function maxRouteDistanceKm(activityType: RouteActivityType): number {
+  return isCyclingActivity(activityType)
+    ? MAX_CYCLING_ROUTE_DISTANCE_KM
+    : MAX_FOOT_ROUTE_DISTANCE_KM;
+}
 
 interface RawCorosMapManifest {
   mapData?: RawCorosMapPackage[];
@@ -80,15 +103,35 @@ interface CorosMapDownloadOptions {
   }) => void;
 }
 
+interface CorosMapInstallProgressContext {
+  totalBytes: number;
+  totalFiles: number;
+  copiedBytesOffset?: number;
+  copiedFilesOffset?: number;
+}
+
 interface CorosMapInstallOptions {
   label?: string;
+  progressContext?: CorosMapInstallProgressContext;
+  /** When false, skip preparing and completed lifecycle publishes (batch middle packages). */
+  publishLifecycle?: boolean;
 }
 
 interface CopyDirectoryOptions {
   totalBytes: number;
   totalFiles: number;
   onProgress: (progress: { copiedBytes: number; copiedFiles: number }) => void;
+  signal?: AbortSignal;
 }
+
+class CorosMapInstallCancelledError extends Error {
+  constructor() {
+    super(COROS_MAP_INSTALL_CANCELLED_MESSAGE);
+    this.name = "CorosMapInstallCancelledError";
+  }
+}
+
+export const COROS_MAP_INSTALL_CANCELLED_MESSAGE = "Transfer cancelled.";
 
 interface UnzipperEntry extends NodeJS.ReadableStream {
   path: string;
@@ -131,6 +174,7 @@ let corosMapInstallProgressListener:
   | ((progress: CorosMapInstallProgress | null) => void)
   | undefined;
 let corosMapInstallProgress: CorosMapInstallProgress | null = null;
+let corosMapInstallAbortController: AbortController | null = null;
 
 interface OrsDirectionsResponse {
   features?: Array<{
@@ -245,6 +289,11 @@ export function setCorosMapInstallProgressListener(
 }
 
 export function getCorosMapInstallProgress(): CorosMapInstallProgress | null {
+  return corosMapInstallProgress;
+}
+
+export function cancelCorosMapInstall(): CorosMapInstallProgress | null {
+  corosMapInstallAbortController?.abort();
   return corosMapInstallProgress;
 }
 
@@ -380,10 +429,228 @@ export async function installCachedCorosMap(
     );
   }
 
-  const extractPath = await ensureCachedCorosMapExtracted(cached);
-  return installCorosMapFolder(extractPath, {
-    label: cached.title
-  });
+  beginCorosMapInstall();
+  try {
+    assertCorosMapInstallNotCancelled();
+    const extractPath = await ensureCachedCorosMapExtracted(cached);
+    assertCorosMapInstallNotCancelled();
+    return await installCorosMapFolder(extractPath, {
+      label: cached.title
+    });
+  } catch (caught) {
+    if (isCorosMapInstallCancelledError(caught)) {
+      if (corosMapInstallProgress?.phase !== "cancelled") {
+        publishCorosMapInstallCancelled({
+          label: cached.title,
+          totalBytes: cached.sizeBytes,
+          totalFiles: 0,
+          copiedBytes: corosMapInstallProgress?.copiedBytes ?? 0,
+          copiedFiles: corosMapInstallProgress?.copiedFiles ?? 0,
+          progress: corosMapInstallProgress?.progress ?? 0
+        });
+      }
+    }
+    throw caught;
+  } finally {
+    endCorosMapInstall();
+  }
+}
+
+export async function installCachedCorosMaps(
+  packageIds: string[]
+): Promise<CorosMapInstallResult> {
+  const uniqueIds = [...new Set(packageIds)];
+  if (uniqueIds.length === 0) {
+    throw new Error("Select at least one cached map package to install.");
+  }
+
+  const cachedPackages: CachedCorosMapPackage[] = [];
+  for (const packageId of uniqueIds) {
+    const cached = getCachedCorosMap(packageId);
+    if (!cached || !fs.existsSync(cached.filePath)) {
+      deleteCachedCorosMapRecord(packageId);
+      throw new Error("Cached COROS map package was not found.");
+    }
+    cachedPackages.push(cached);
+  }
+
+  const status = await getWatchStatus();
+  if (!status.connected || !status.rootPath) {
+    throw new Error("Connect a COROS watch before installing maps.");
+  }
+
+  const totalSizeBytes = cachedPackages.reduce(
+    (sum, cached) => sum + cached.sizeBytes,
+    0
+  );
+  if (status.freeBytes !== undefined && totalSizeBytes > status.freeBytes) {
+    throw new Error(
+      "The selected map packages are larger than the free space on the watch."
+    );
+  }
+
+  const preparedPackages: Array<{
+    cached: CachedCorosMapPackage;
+    selection: CorosMapLocalSelection;
+  }> = [];
+  let totalBytes = 0;
+  let totalFiles = 0;
+
+  beginCorosMapInstall();
+  try {
+    for (const cached of cachedPackages) {
+      assertCorosMapInstallNotCancelled();
+      const extractPath = await ensureCachedCorosMapExtracted(cached);
+      assertCorosMapInstallNotCancelled();
+      const selection = await inspectCorosMapFolder(extractPath);
+      preparedPackages.push({ cached, selection });
+      totalBytes += selection.sizeBytes;
+      totalFiles += selection.fileCount;
+    }
+
+    const installedPath = path.join(status.rootPath, "map");
+    const batchLabel =
+      cachedPackages.length === 1
+        ? cachedPackages[0]!.title
+        : `${cachedPackages.length} map packages`;
+
+    publishCorosMapInstallProgress({
+      active: true,
+      phase: "preparing",
+      label: batchLabel,
+      installedPath,
+      copiedBytes: 0,
+      totalBytes,
+      copiedFiles: 0,
+      totalFiles,
+      progress: 0,
+      updatedAt: new Date().toISOString()
+    });
+
+    let copiedBytesOffset = 0;
+    let copiedFilesOffset = 0;
+    let aggregateSizeBytes = 0;
+    let aggregateFileCount = 0;
+
+    try {
+      await fs.promises.mkdir(installedPath, { recursive: true });
+
+      for (let index = 0; index < preparedPackages.length; index += 1) {
+        assertCorosMapInstallNotCancelled();
+        const { cached, selection } = preparedPackages[index]!;
+        const isLastPackage = index === preparedPackages.length - 1;
+        const progressLabel =
+          preparedPackages.length === 1
+            ? cached.title
+            : `${index + 1} of ${preparedPackages.length}: ${cached.title}`;
+
+        const result = await installCorosMapFolder(selection.sourcePath, {
+          label: progressLabel,
+          publishLifecycle: false,
+          progressContext: {
+            totalBytes,
+            totalFiles,
+            copiedBytesOffset,
+            copiedFilesOffset
+          }
+        });
+
+        copiedBytesOffset += selection.sizeBytes;
+        copiedFilesOffset += selection.fileCount;
+        aggregateSizeBytes += result.sizeBytes;
+        aggregateFileCount += result.fileCount;
+
+        if (!isLastPackage) {
+          publishCorosMapInstallProgress({
+            active: true,
+            phase: "copying",
+            label: progressLabel,
+            sourcePath: selection.sourcePath,
+            installedPath,
+            copiedBytes: copiedBytesOffset,
+            totalBytes,
+            copiedFiles: copiedFilesOffset,
+            totalFiles,
+            progress:
+              totalBytes > 0 ? Math.min(copiedBytesOffset / totalBytes, 1) : 1,
+            updatedAt: new Date().toISOString()
+          });
+        }
+      }
+    } catch (caught) {
+      if (isCorosMapInstallCancelledError(caught)) {
+        publishCorosMapInstallCancelled({
+          label: batchLabel,
+          installedPath,
+          totalBytes,
+          totalFiles,
+          copiedBytes:
+            corosMapInstallProgress?.copiedBytes ?? copiedBytesOffset,
+          copiedFiles:
+            corosMapInstallProgress?.copiedFiles ?? copiedFilesOffset,
+          progress: corosMapInstallProgress?.progress ?? 0
+        });
+        throw caught;
+      }
+
+      const error = toWatchInstallError(caught, status.rootPath);
+      publishCorosMapInstallProgress({
+        active: false,
+        phase: "failed",
+        label: batchLabel,
+        installedPath,
+        copiedBytes: corosMapInstallProgress?.copiedBytes ?? copiedBytesOffset,
+        totalBytes,
+        copiedFiles: corosMapInstallProgress?.copiedFiles ?? copiedFilesOffset,
+        totalFiles,
+        progress: corosMapInstallProgress?.progress ?? 0,
+        error: error.message,
+        updatedAt: new Date().toISOString()
+      });
+      throw error;
+    }
+
+    publishCorosMapInstallProgress({
+      active: false,
+      phase: "completed",
+      label: batchLabel,
+      installedPath,
+      copiedBytes: totalBytes,
+      totalBytes,
+      copiedFiles: totalFiles,
+      totalFiles,
+      progress: 1,
+      updatedAt: new Date().toISOString()
+    });
+
+    return {
+      sourcePath: preparedPackages[0]!.selection.sourcePath,
+      mapPath: preparedPackages[0]!.selection.mapPath,
+      sizeBytes: aggregateSizeBytes,
+      fileCount: aggregateFileCount,
+      installedPath,
+      watch: await getWatchStatus()
+    };
+  } catch (caught) {
+    if (isCorosMapInstallCancelledError(caught)) {
+      if (corosMapInstallProgress?.phase !== "cancelled") {
+        publishCorosMapInstallCancelled({
+          label:
+            cachedPackages.length === 1
+              ? cachedPackages[0]!.title
+              : `${cachedPackages.length} map packages`,
+          totalBytes: totalBytes || totalSizeBytes,
+          totalFiles,
+          copiedBytes: corosMapInstallProgress?.copiedBytes ?? 0,
+          copiedFiles: corosMapInstallProgress?.copiedFiles ?? 0,
+          progress: corosMapInstallProgress?.progress ?? 0
+        });
+      }
+    }
+    throw caught;
+  } finally {
+    endCorosMapInstall();
+  }
 }
 
 export async function deleteCachedCorosMap(
@@ -521,117 +788,169 @@ export async function installCorosMapFolder(
   sourcePath: string,
   options: CorosMapInstallOptions = {}
 ): Promise<CorosMapInstallResult> {
-  const selection = await inspectCorosMapFolder(sourcePath);
-  const status = await getWatchStatus();
-
-  if (!status.connected || !status.rootPath) {
-    throw new Error("Connect a COROS watch before installing maps.");
+  const ownsInstallSession = !getCorosMapInstallSignal();
+  if (ownsInstallSession) {
+    beginCorosMapInstall();
   }
-
-  if (
-    status.freeBytes !== undefined &&
-    selection.sizeBytes > status.freeBytes
-  ) {
-    throw new Error(
-      `The selected map folder is larger than the free space on the watch.`
-    );
-  }
-
-  const installedPath = path.join(status.rootPath, "map");
-  assertNotSameOrNested(selection.mapPath, installedPath);
-  const label = options.label ?? path.basename(selection.sourcePath);
-
-  publishCorosMapInstallProgress({
-    active: true,
-    phase: "preparing",
-    label,
-    sourcePath: selection.sourcePath,
-    installedPath,
-    copiedBytes: 0,
-    totalBytes: selection.sizeBytes,
-    copiedFiles: 0,
-    totalFiles: selection.fileCount,
-    progress: 0,
-    updatedAt: new Date().toISOString()
-  });
 
   try {
-    await fs.promises.mkdir(installedPath, { recursive: true });
-    publishCorosMapInstallProgress({
-      active: true,
-      phase: "copying",
-      label,
-      sourcePath: selection.sourcePath,
-      installedPath,
-      copiedBytes: 0,
-      totalBytes: selection.sizeBytes,
-      copiedFiles: 0,
-      totalFiles: selection.fileCount,
-      progress: 0,
-      updatedAt: new Date().toISOString()
-    });
-    await copyDirectoryContents(selection.mapPath, installedPath, {
-      totalBytes: selection.sizeBytes,
-      totalFiles: selection.fileCount,
-      onProgress: ({ copiedBytes, copiedFiles }) => {
-        publishCorosMapInstallProgress({
-          active: true,
-          phase: "copying",
-          label,
-          sourcePath: selection.sourcePath,
-          installedPath,
-          copiedBytes,
-          totalBytes: selection.sizeBytes,
-          copiedFiles,
-          totalFiles: selection.fileCount,
-          progress:
-            selection.sizeBytes > 0
-              ? Math.min(copiedBytes / selection.sizeBytes, 1)
-              : copiedFiles >= selection.fileCount
-                ? 1
-                : 0,
-          updatedAt: new Date().toISOString()
-        });
+    const selection = await inspectCorosMapFolder(sourcePath);
+    const status = await getWatchStatus();
+
+    if (!status.connected || !status.rootPath) {
+      throw new Error("Connect a COROS watch before installing maps.");
+    }
+
+    const progressContext = options.progressContext;
+    const publishLifecycle = options.publishLifecycle !== false;
+    const totalBytes = progressContext?.totalBytes ?? selection.sizeBytes;
+    const totalFiles = progressContext?.totalFiles ?? selection.fileCount;
+    const copiedBytesOffset = progressContext?.copiedBytesOffset ?? 0;
+    const copiedFilesOffset = progressContext?.copiedFilesOffset ?? 0;
+    const installSignal = getCorosMapInstallSignal();
+
+    const computeProgress = (copiedBytes: number, copiedFiles: number) =>
+      totalBytes > 0
+        ? Math.min((copiedBytesOffset + copiedBytes) / totalBytes, 1)
+        : copiedFilesOffset + copiedFiles >= totalFiles
+          ? 1
+          : 0;
+
+    if (
+      !progressContext &&
+      status.freeBytes !== undefined &&
+      selection.sizeBytes > status.freeBytes
+    ) {
+      throw new Error(
+        `The selected map folder is larger than the free space on the watch.`
+      );
+    }
+
+    const installedPath = path.join(status.rootPath, "map");
+    assertNotSameOrNested(selection.mapPath, installedPath);
+    const label = options.label ?? path.basename(selection.sourcePath);
+
+    if (publishLifecycle) {
+      publishCorosMapInstallProgress({
+        active: true,
+        phase: "preparing",
+        label,
+        sourcePath: selection.sourcePath,
+        installedPath,
+        copiedBytes: copiedBytesOffset,
+        totalBytes,
+        copiedFiles: copiedFilesOffset,
+        totalFiles,
+        progress: computeProgress(0, 0),
+        updatedAt: new Date().toISOString()
+      });
+    }
+
+    try {
+      if (publishLifecycle) {
+        await fs.promises.mkdir(installedPath, { recursive: true });
       }
-    });
-  } catch (caught) {
-    const error = toWatchInstallError(caught, status.rootPath);
-    publishCorosMapInstallProgress({
-      active: false,
-      phase: "failed",
-      label,
-      sourcePath: selection.sourcePath,
+      assertCorosMapInstallNotCancelled();
+      publishCorosMapInstallProgress({
+        active: true,
+        phase: "copying",
+        label,
+        sourcePath: selection.sourcePath,
+        installedPath,
+        copiedBytes: copiedBytesOffset,
+        totalBytes,
+        copiedFiles: copiedFilesOffset,
+        totalFiles,
+        progress: computeProgress(0, 0),
+        updatedAt: new Date().toISOString()
+      });
+      await copyDirectoryContents(selection.mapPath, installedPath, {
+        totalBytes: selection.sizeBytes,
+        totalFiles: selection.fileCount,
+        signal: installSignal,
+        onProgress: ({ copiedBytes, copiedFiles }) => {
+          const aggregateCopiedBytes = copiedBytesOffset + copiedBytes;
+          const aggregateCopiedFiles = copiedFilesOffset + copiedFiles;
+          publishCorosMapInstallProgress({
+            active: true,
+            phase: "copying",
+            label,
+            sourcePath: selection.sourcePath,
+            installedPath,
+            copiedBytes: aggregateCopiedBytes,
+            totalBytes,
+            copiedFiles: aggregateCopiedFiles,
+            totalFiles,
+            progress: computeProgress(copiedBytes, copiedFiles),
+            updatedAt: new Date().toISOString()
+          });
+        }
+      });
+    } catch (caught) {
+      if (isCorosMapInstallCancelledError(caught)) {
+        if (publishLifecycle) {
+          publishCorosMapInstallCancelled({
+            label,
+            sourcePath: selection.sourcePath,
+            installedPath,
+            totalBytes,
+            totalFiles,
+            copiedBytes:
+              corosMapInstallProgress?.copiedBytes ?? copiedBytesOffset,
+            copiedFiles:
+              corosMapInstallProgress?.copiedFiles ?? copiedFilesOffset,
+            progress: corosMapInstallProgress?.progress ?? computeProgress(0, 0)
+          });
+        }
+        throw caught;
+      }
+
+      const error = toWatchInstallError(caught, status.rootPath);
+      publishCorosMapInstallProgress({
+        active: false,
+        phase: "failed",
+        label,
+        sourcePath: selection.sourcePath,
+        installedPath,
+        copiedBytes:
+          corosMapInstallProgress?.copiedBytes ?? copiedBytesOffset,
+        totalBytes,
+        copiedFiles:
+          corosMapInstallProgress?.copiedFiles ?? copiedFilesOffset,
+        totalFiles,
+        progress: corosMapInstallProgress?.progress ?? computeProgress(0, 0),
+        error: error.message,
+        updatedAt: new Date().toISOString()
+      });
+      throw error;
+    }
+
+    if (publishLifecycle) {
+      publishCorosMapInstallProgress({
+        active: false,
+        phase: "completed",
+        label,
+        sourcePath: selection.sourcePath,
+        installedPath,
+        copiedBytes: copiedBytesOffset + selection.sizeBytes,
+        totalBytes,
+        copiedFiles: copiedFilesOffset + selection.fileCount,
+        totalFiles,
+        progress: 1,
+        updatedAt: new Date().toISOString()
+      });
+    }
+
+    return {
+      ...selection,
       installedPath,
-      copiedBytes: corosMapInstallProgress?.copiedBytes ?? 0,
-      totalBytes: selection.sizeBytes,
-      copiedFiles: corosMapInstallProgress?.copiedFiles ?? 0,
-      totalFiles: selection.fileCount,
-      progress: corosMapInstallProgress?.progress ?? 0,
-      error: error.message,
-      updatedAt: new Date().toISOString()
-    });
-    throw error;
+      watch: await getWatchStatus()
+    };
+  } finally {
+    if (ownsInstallSession) {
+      endCorosMapInstall();
+    }
   }
-
-  publishCorosMapInstallProgress({
-    active: false,
-    phase: "completed",
-    label,
-    sourcePath: selection.sourcePath,
-    installedPath,
-    copiedBytes: selection.sizeBytes,
-    totalBytes: selection.sizeBytes,
-    copiedFiles: selection.fileCount,
-    totalFiles: selection.fileCount,
-    progress: 1,
-    updatedAt: new Date().toISOString()
-  });
-
-  return {
-    ...selection,
-    installedPath,
-    watch: await getWatchStatus()
-  };
 }
 
 export function getRouteBuilderConfig(): RouteBuilderConfig {
@@ -649,6 +968,91 @@ export function saveRouteBuilderConfig(
 
 export function listGeneratedRoutes(): GeneratedRoute[] {
   return listSavedGeneratedRoutes();
+}
+
+/**
+ * Makes a cheap geocode call so the user learns immediately whether their ORS
+ * key works, instead of discovering it at route-generation time.
+ */
+export async function validateRouteApiKey(
+  apiKey: string
+): Promise<RouteApiKeyValidation> {
+  const trimmed = apiKey.trim();
+  if (!trimmed) {
+    return { status: "empty", message: "Enter an OpenRouteService API key." };
+  }
+
+  try {
+    const url = new URL(`${ORS_BASE_URL}/geocode/search`);
+    url.searchParams.set("api_key", trimmed);
+    url.searchParams.set("text", "Boulder, Colorado");
+    url.searchParams.set("size", "1");
+    const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+
+    if (response.ok) {
+      return { status: "valid", message: "API key verified." };
+    }
+    if (response.status === 401 || response.status === 403) {
+      return {
+        status: "invalid",
+        message: "OpenRouteService rejected this API key."
+      };
+    }
+    if (response.status === 429) {
+      return {
+        status: "quota",
+        message: "Key is valid but the daily request quota is reached."
+      };
+    }
+    return {
+      status: "error",
+      message: `OpenRouteService returned ${response.status} ${response.statusText}.`
+    };
+  } catch (caught) {
+    return {
+      status: "error",
+      message:
+        caught instanceof Error
+          ? `Could not reach OpenRouteService: ${caught.message}`
+          : "Could not reach OpenRouteService."
+    };
+  }
+}
+
+/** Maps an ORS error response to a user-friendly message. */
+function describeOrsError(
+  status: number,
+  statusText: string,
+  details: string
+): string {
+  if (status === 401 || status === 403) {
+    return "OpenRouteService rejected the API key. Re-check it in the key settings above.";
+  }
+  if (status === 429) {
+    return "OpenRouteService daily quota reached. Try again later or use a different key.";
+  }
+  const orsCode = parseOrsErrorCode(details);
+  if (orsCode === 2010) {
+    return "No road or path was found near your start or destination. Move the point closer to a routable road or trail, or switch the sport (e.g. road vs. trail).";
+  }
+  if (orsCode === 2004) {
+    return "That route is too long for OpenRouteService. Reduce the distance and try again.";
+  }
+  if (status === 404) {
+    return "OpenRouteService could not build a route between those points. Try a different distance or location.";
+  }
+  const trimmed = details.trim();
+  return `OpenRouteService route request failed: ${status} ${statusText}${trimmed ? ` - ${trimmed.slice(0, 180)}` : ""}`;
+}
+
+/** Extracts the numeric ORS error code from a JSON error response body. */
+function parseOrsErrorCode(details: string): number | undefined {
+  try {
+    const parsed = JSON.parse(details) as { error?: { code?: number } };
+    return parsed.error?.code;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function openLocationServicesSettings(): Promise<void> {
@@ -747,8 +1151,7 @@ export async function generateRoute(
       ? await geocodeLocation(normalized.destinationLocation ?? "", apiKey)
       : undefined;
 
-  const profile =
-    normalized.surfacePreference === "trail" ? "foot-hiking" : "foot-walking";
+  const profile = ORS_PROFILE_BY_ACTIVITY[normalized.activityType];
   const body = buildOrsDirectionsBody(
     normalized,
     start.coordinates,
@@ -767,9 +1170,7 @@ export async function generateRoute(
 
   if (!response.ok) {
     const details = await response.text().catch(() => "");
-    throw new Error(
-      `OpenRouteService route request failed: ${response.status} ${response.statusText}${details ? ` - ${details.slice(0, 180)}` : ""}`
-    );
+    throw new Error(describeOrsError(response.status, response.statusText, details));
   }
 
   const route = routeFromOrsResponse(
@@ -808,6 +1209,21 @@ export async function exportGeneratedRoute(id: string): Promise<string | null> {
   return result.filePath;
 }
 
+export function deleteGeneratedRoute(id: string): boolean {
+  const route = getGeneratedRoute(id);
+  const removed = deleteSavedGeneratedRoute(id);
+  if (route?.gpxPath) {
+    fs.promises.rm(route.gpxPath, { force: true }).catch(() => undefined);
+  }
+  return removed;
+}
+
+// NOTE: COROS watches do not import navigable routes over the USB cable (unlike
+// Garmin's Courses/NewFiles folders) — the watch's mass storage is effectively
+// Music-only. Routes reach the watch via the COROS phone app over Bluetooth, or
+// (future) by uploading to the user's COROS account so it syncs through the app.
+// See uploadRouteToCorosAccount() groundwork in trainingHubService.ts.
+
 export function buildOrsDirectionsBody(
   request: GenerateRouteRequest,
   startCoordinates: [number, number],
@@ -824,13 +1240,20 @@ export function buildOrsDirectionsBody(
   const options: Record<string, unknown> = {};
 
   if (request.mode === "loop") {
+    const variation = request.variationSeed ? `:${request.variationSeed}` : "";
     options.round_trip = {
       length: Math.round(request.distanceKm * 1000),
       points: 3,
       seed: stableSeed(
-        `${request.startLocation}:${request.distanceKm}:${request.surfacePreference}`
+        `${request.startLocation}:${request.distanceKm}:${request.activityType}${variation}`
       )
     };
+  }
+
+  // `avoid_features: ["highways"]` is only valid for cycling/driving profiles in
+  // ORS; foot profiles reject it, so it stays a no-op for walking/running/hiking.
+  if (request.avoidHighways && isCyclingActivity(request.activityType)) {
+    options.avoid_features = ["highways"];
   }
 
   if (request.elevationPreference !== "any") {
@@ -844,6 +1267,11 @@ export function buildOrsDirectionsBody(
 
   return {
     coordinates,
+    // Let ORS snap each waypoint to the nearest routable road/path instead of
+    // failing with code 2010 when the pin is just off the network. -1 = no
+    // limit, so a start picked in a park, on a building, or just offshore still
+    // resolves to the closest usable point.
+    radiuses: coordinates.map(() => -1),
     elevation: true,
     instructions: false,
     preference: "recommended",
@@ -852,8 +1280,11 @@ export function buildOrsDirectionsBody(
 }
 
 export function buildRouteGpx(route: GeneratedRoute): string {
-  const trkpts = route.points
-    .filter((point) => point.lat !== undefined && point.lon !== undefined)
+  const validPoints = route.points.filter(
+    (point) => point.lat !== undefined && point.lon !== undefined
+  );
+
+  const trkpts = validPoints
     .map((point) => {
       const elevation =
         point.elevation !== undefined ? `<ele>${point.elevation}</ele>` : "";
@@ -861,10 +1292,28 @@ export function buildRouteGpx(route: GeneratedRoute): string {
     })
     .join("\n");
 
+  // COROS navigation follows a GPX <rte> course. Decimate the dense routing
+  // geometry to keep the route lightweight while still tracing the path.
+  const rtepts = decimatePoints(validPoints, 400)
+    .map((point) => {
+      const elevation =
+        point.elevation !== undefined ? `<ele>${point.elevation}</ele>` : "";
+      return `    <rtept lat="${point.lat}" lon="${point.lon}">${elevation}</rtept>`;
+    })
+    .join("\n");
+
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<gpx version="1.1" creator="CorosLink" xmlns="http://www.topografix.com/GPX/1/1">',
-    `  <metadata><name>${escapeXml(route.name)}</name></metadata>`,
+    "  <metadata>",
+    `    <name>${escapeXml(route.name)}</name>`,
+    `    <desc>${escapeXml(describeRoute(route))}</desc>`,
+    `    <time>${escapeXml(route.createdAt)}</time>`,
+    "  </metadata>",
+    "  <rte>",
+    `    <name>${escapeXml(route.name)}</name>`,
+    rtepts,
+    "  </rte>",
     "  <trk>",
     `    <name>${escapeXml(route.name)}</name>`,
     "    <trkseg>",
@@ -874,6 +1323,43 @@ export function buildRouteGpx(route: GeneratedRoute): string {
     "</gpx>",
     ""
   ].join("\n");
+}
+
+/** Human-readable summary embedded in the GPX <desc>. */
+function describeRoute(route: GeneratedRoute): string {
+  const parts = [
+    `${(route.distanceMeters / 1000).toFixed(1)} km`,
+    ROUTE_ACTIVITY_LABELS[route.activityType] ?? route.activityType,
+    route.mode === "loop" ? "loop" : "point-to-point"
+  ];
+  if (route.ascentMeters !== undefined) {
+    parts.push(`${Math.round(route.ascentMeters)} m ascent`);
+  }
+  return parts.join(" · ");
+}
+
+const ROUTE_ACTIVITY_LABELS: Record<RouteActivityType, string> = {
+  walking: "Walking",
+  running: "Running",
+  hiking: "Hiking",
+  "cycling-road": "Road cycling",
+  "cycling-mountain": "Mountain biking"
+};
+
+/** Evenly samples at most `maxPoints` points, always keeping first and last. */
+function decimatePoints(
+  points: TrainingHubTrackPoint[],
+  maxPoints: number
+): TrainingHubTrackPoint[] {
+  if (points.length <= maxPoints || maxPoints < 2) {
+    return points;
+  }
+  const step = (points.length - 1) / (maxPoints - 1);
+  const sampled: TrainingHubTrackPoint[] = [];
+  for (let index = 0; index < maxPoints; index += 1) {
+    sampled.push(points[Math.round(index * step)]!);
+  }
+  return sampled;
 }
 
 async function runCorosMapDownload(
@@ -1176,9 +1662,11 @@ async function copyDirectoryContents(
   options: CopyDirectoryOptions,
   progress = { copiedBytes: 0, copiedFiles: 0 }
 ): Promise<void> {
+  assertCorosMapInstallNotCancelled(options.signal);
   const entries = await fs.promises.readdir(sourcePath, { withFileTypes: true });
 
   for (const entry of entries) {
+    assertCorosMapInstallNotCancelled(options.signal);
     const source = path.join(sourcePath, entry.name);
     const destination = path.join(destinationPath, entry.name);
 
@@ -1199,6 +1687,80 @@ async function copyDirectoryContents(
       });
     }
   }
+}
+
+function beginCorosMapInstall(): void {
+  if (corosMapInstallAbortController) {
+    throw new Error("A map transfer is already in progress.");
+  }
+
+  corosMapInstallAbortController = new AbortController();
+}
+
+function endCorosMapInstall(): void {
+  corosMapInstallAbortController = null;
+}
+
+function getCorosMapInstallSignal(): AbortSignal | undefined {
+  return corosMapInstallAbortController?.signal;
+}
+
+function assertCorosMapInstallNotCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new CorosMapInstallCancelledError();
+  }
+}
+
+function isCorosMapInstallCancelledError(caught: unknown): boolean {
+  if (caught instanceof CorosMapInstallCancelledError) {
+    return true;
+  }
+
+  const message = caught instanceof Error ? caught.message : String(caught);
+  return message.includes(COROS_MAP_INSTALL_CANCELLED_MESSAGE);
+}
+
+export function toCorosMapInstallIpcError(error: unknown): Error {
+  if (isCorosMapInstallCancelledError(error)) {
+    return new Error(COROS_MAP_INSTALL_CANCELLED_MESSAGE);
+  }
+
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function publishCorosMapInstallCancelled({
+  label,
+  sourcePath,
+  installedPath,
+  totalBytes,
+  totalFiles,
+  copiedBytes,
+  copiedFiles,
+  progress
+}: {
+  label: string;
+  sourcePath?: string;
+  installedPath?: string;
+  totalBytes: number;
+  totalFiles: number;
+  copiedBytes: number;
+  copiedFiles: number;
+  progress: number;
+}): void {
+  publishCorosMapInstallProgress({
+    active: false,
+    phase: "cancelled",
+    label,
+    sourcePath,
+    installedPath,
+    copiedBytes,
+    totalBytes,
+    copiedFiles,
+    totalFiles,
+    progress,
+    error: COROS_MAP_INSTALL_CANCELLED_MESSAGE,
+    updatedAt: new Date().toISOString()
+  });
 }
 
 function publishCorosMapInstallProgress(
@@ -1249,6 +1811,8 @@ function normalizeGenerateRouteRequest(
   const startLocation = request.startLocation.trim();
   const destinationLocation = request.destinationLocation?.trim();
   const distanceKm = Number(request.distanceKm);
+  const activityType = request.activityType ?? "walking";
+  const maxDistanceKm = maxRouteDistanceKm(activityType);
 
   if (!startLocation) {
     throw new Error("Enter a start location.");
@@ -1264,9 +1828,9 @@ function normalizeGenerateRouteRequest(
   if (
     !Number.isFinite(distanceKm) ||
     distanceKm <= 0 ||
-    distanceKm > MAX_ROUTE_DISTANCE_KM
+    distanceKm > maxDistanceKm
   ) {
-    throw new Error(`Enter a route distance between 0 and ${MAX_ROUTE_DISTANCE_KM} km.`);
+    throw new Error(`Enter a route distance between 0 and ${maxDistanceKm} km.`);
   }
 
   return {
@@ -1274,9 +1838,11 @@ function normalizeGenerateRouteRequest(
     destinationLocation,
     distanceKm,
     mode: request.mode,
+    activityType,
     surfacePreference: request.surfacePreference,
     avoidHighways: request.avoidHighways,
-    elevationPreference: request.elevationPreference
+    elevationPreference: request.elevationPreference,
+    variationSeed: request.variationSeed
   };
 }
 
@@ -1392,6 +1958,7 @@ function routeFromOrsResponse(
     ascentMeters: feature?.properties?.ascent,
     descentMeters: feature?.properties?.descent,
     mode: request.mode,
+    activityType: request.activityType,
     surfacePreference: request.surfacePreference,
     avoidHighways: request.avoidHighways,
     elevationPreference: request.elevationPreference,

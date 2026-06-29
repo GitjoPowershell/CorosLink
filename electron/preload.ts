@@ -13,8 +13,11 @@ import type {
   GenerateRouteRequest,
   GeneratedRoute,
   LocalTrack,
+  RouteApiKeyValidation,
   RouteBuilderConfig,
   RouteGeocodeResult,
+  ActivityPaceBaselines,
+  RouteShareSession,
   SpotifyConfig,
   SpotifyPlaylist,
   SpotifyPlaylistTrack,
@@ -177,6 +180,8 @@ const api = {
     ipcRenderer.invoke("trainingHub:getDailyMetrics", dateList),
   getSportTypeMap: (): Promise<TrainingHubSportType[]> =>
     ipcRenderer.invoke("trainingHub:getSportTypeMap"),
+  getActivityPaceBaselines: (): Promise<ActivityPaceBaselines> =>
+    ipcRenderer.invoke("trainingHub:getActivityPaceBaselines"),
   getUpcomingWorkouts: (
     days?: number
   ): Promise<TrainingHubUpcomingWorkout[]> =>
@@ -212,6 +217,8 @@ const api = {
     ipcRenderer.invoke("maps:listCachedCorosMaps"),
   getCorosMapInstallProgress: (): Promise<CorosMapInstallProgress | null> =>
     ipcRenderer.invoke("maps:getCorosMapInstallProgress"),
+  cancelCorosMapInstall: (): Promise<CorosMapInstallProgress | null> =>
+    ipcRenderer.invoke("maps:cancelCorosMapInstall"),
   onCorosMapInstallProgressUpdate: (
     callback: (progress: CorosMapInstallProgress | null) => void
   ): (() => void) => {
@@ -227,6 +234,10 @@ const api = {
   },
   installCachedCorosMap: (packageId: string): Promise<CorosMapInstallResult> =>
     ipcRenderer.invoke("maps:installCachedCorosMap", packageId),
+  installCachedCorosMaps: (
+    packageIds: string[]
+  ): Promise<CorosMapInstallResult> =>
+    ipcRenderer.invoke("maps:installCachedCorosMaps", packageIds),
   deleteCachedCorosMap: (
     packageId: string
   ): Promise<CachedCorosMapPackage[]> =>
@@ -255,6 +266,14 @@ const api = {
     ipcRenderer.invoke("maps:generateRoute", request),
   exportGeneratedRoute: (id: string): Promise<string | null> =>
     ipcRenderer.invoke("maps:exportGeneratedRoute", id),
+  deleteGeneratedRoute: (id: string): Promise<boolean> =>
+    ipcRenderer.invoke("maps:deleteGeneratedRoute", id),
+  startRouteShare: (id: string): Promise<RouteShareSession> =>
+    ipcRenderer.invoke("maps:startRouteShare", id),
+  stopRouteShare: (): Promise<void> =>
+    ipcRenderer.invoke("maps:stopRouteShare"),
+  validateRouteApiKey: (apiKey: string): Promise<RouteApiKeyValidation> =>
+    ipcRenderer.invoke("maps:validateRouteApiKey", apiKey),
   getAppUpdateStatus: (): Promise<AppUpdateSnapshot> =>
     ipcRenderer.invoke("app:getUpdateStatus"),
   checkForAppUpdates: (): Promise<AppUpdateSnapshot> =>
