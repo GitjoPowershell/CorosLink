@@ -71,6 +71,7 @@ import { TrainingHubView } from "./training/TrainingHubView";
 import type { TrainingHubSnapshot } from "./training/types";
 import type { CorosLinkApi } from "./coroslink-api";
 import { AppUpdateControls } from "./components/AppUpdateControls";
+import { WatchConnectionSmokeControls } from "./components/WatchConnectionSmokeControls";
 import { MapsView } from "./maps/MapsView";
 import {
   LibrarySyncLayout,
@@ -184,6 +185,8 @@ export default function App() {
       supported: false,
       currentVersion: "0.0.0",
       status: "idle",
+      autoCheck: true,
+      autoDownload: true,
     },
   );
 
@@ -594,6 +597,43 @@ export default function App() {
       .catch((caught) => {
         setError(toErrorMessage(caught));
       });
+  }
+
+  async function handleDownloadUpdate() {
+    if (!api) {
+      return;
+    }
+
+    setBusy("update-download");
+    setError(null);
+    try {
+      const snapshot = await api.downloadAppUpdate();
+      setAppUpdateSnapshot(snapshot);
+
+      if (snapshot.status === "error") {
+        setError(snapshot.error ?? "Could not download the update.");
+      }
+    } catch (caught) {
+      setError(toErrorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleUpdatePreferencesChange(prefs: {
+    autoCheck?: boolean;
+    autoDownload?: boolean;
+  }) {
+    if (!api) {
+      return;
+    }
+
+    try {
+      const snapshot = await api.setUpdatePreferences(prefs);
+      setAppUpdateSnapshot(snapshot);
+    } catch (caught) {
+      setError(toErrorMessage(caught));
+    }
   }
 
   async function loadSpotifyPlaylist(playlistId: string) {
@@ -1342,8 +1382,16 @@ export default function App() {
           <AppUpdateControls
             snapshot={appUpdateSnapshot}
             busy={busy === "update-check"}
+            downloading={busy === "update-download"}
             onCheck={() => void handleCheckForUpdates()}
+            onDownload={() => void handleDownloadUpdate()}
             onInstall={handleInstallUpdate}
+            onPreferencesChange={handleUpdatePreferencesChange}
+          />
+          <WatchConnectionSmokeControls
+            api={api}
+            onWatchStatusChange={setWatchStatus}
+            onError={setError}
           />
           <div
             className={`watch-status-chip${watchStatus?.connected ? " connected" : ""}`}

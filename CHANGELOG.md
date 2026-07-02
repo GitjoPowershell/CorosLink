@@ -5,6 +5,16 @@ All notable changes to CorosLink are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Update preferences** — a settings menu next to the version chip to toggle automatic update checks and automatic downloads. With auto-download off, CorosLink surfaces a **Download** button so you choose when to fetch an available update (#2)
+
+### Fixed
+
+- Training Hub load heatmap tooltip no longer truncated by the scroll container; it now renders fully above the top-row cells (#1)
+
 ## [0.1.11] - 2026-06-30
 
 ### Added

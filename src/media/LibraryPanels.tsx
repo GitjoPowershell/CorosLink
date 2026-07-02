@@ -793,7 +793,12 @@ export function WatchLibraryPanel({
   }
 
   return (
-    <section className="library-panel library-panel--watch" aria-label="On watch">
+    <section
+      className={`library-panel library-panel--watch ${
+        watchConnected ? "is-connected" : "is-disconnected"
+      }`}
+      aria-label="On watch"
+    >
       <header className="library-panel-header">
         <div>
           <span className="library-panel-eyebrow">
@@ -835,7 +840,11 @@ export function WatchLibraryPanel({
       </div>
 
       {!watchConnected ? (
-        <LibraryEmptyState title={emptyTitle()} />
+        <LibraryEmptyState
+          title={emptyTitle()}
+          subtitle="to view and manage your music"
+          variant="watch"
+        />
       ) : watchTracks.length > 0 ? (
         <>
           <div className="library-panel-tools">
@@ -1033,11 +1042,88 @@ function SortButton<Key extends string>({
   );
 }
 
-function LibraryEmptyState({ title }: { title: string }) {
+function WatchConnectIllustration() {
   return (
-    <div className="library-empty-state">
-      <Music size={24} aria-hidden="true" />
+    <div className="watch-connect-illustration">
+      <svg
+        className="watch-connect-art"
+        viewBox="0 0 260 260"
+        fill="none"
+        aria-hidden="true"
+      >
+        {/* orbiting dotted ring */}
+        <circle cx="130" cy="130" r="84" className="watch-ring" />
+
+        {/* watch bands */}
+        <path
+          className="watch-line"
+          d="M108 90 L108 58 Q108 48 118 48 L142 48 Q152 48 152 58 L152 90"
+        />
+        <path
+          className="watch-line"
+          d="M108 170 L108 202 Q108 212 118 212 L142 212 Q152 212 152 202 L152 170"
+        />
+
+        {/* watch case */}
+        <circle cx="130" cy="130" r="46" className="watch-line" />
+        <circle cx="130" cy="130" r="38" className="watch-line watch-line--faint" />
+
+        {/* side buttons */}
+        <rect x="175" y="117" width="7" height="18" rx="3.5" className="watch-line" />
+        <rect
+          x="175"
+          y="140"
+          width="6"
+          height="11"
+          rx="3"
+          className="watch-line watch-line--faint"
+        />
+
+        {/* scattered particles */}
+        <circle cx="44" cy="150" r="2" className="watch-dot watch-dot--amber" />
+        <circle cx="30" cy="172" r="1.6" className="watch-dot watch-dot--green" />
+        <circle cx="52" cy="108" r="1.4" className="watch-dot watch-dot--muted" />
+        <circle cx="80" cy="52" r="1.5" className="watch-dot watch-dot--teal" />
+        <circle cx="96" cy="232" r="2" className="watch-dot watch-dot--amber" />
+        <circle cx="122" cy="214" r="1.6" className="watch-dot watch-dot--green" />
+        <circle cx="150" cy="228" r="2.1" className="watch-dot watch-dot--amber" />
+        <circle cx="168" cy="58" r="1.4" className="watch-dot watch-dot--muted" />
+        <circle cx="200" cy="196" r="1.6" className="watch-dot watch-dot--amber" />
+        <circle cx="212" cy="120" r="1.6" className="watch-dot watch-dot--teal" />
+        <circle cx="196" cy="150" r="1.5" className="watch-dot watch-dot--muted" />
+        <circle cx="222" cy="86" r="1.5" className="watch-dot watch-dot--amber" />
+        <circle cx="74" cy="196" r="1.4" className="watch-dot watch-dot--muted" />
+        <circle cx="60" cy="230" r="1.5" className="watch-dot watch-dot--green" />
+      </svg>
+      <Music className="watch-connect-note" size={34} aria-hidden="true" />
+    </div>
+  );
+}
+
+function LibraryEmptyState({
+  title,
+  subtitle,
+  variant = "default",
+}: {
+  title: string;
+  subtitle?: string;
+  variant?: "default" | "watch";
+}) {
+  return (
+    <div
+      className={`library-empty-state${
+        variant === "watch" ? " library-empty-state--watch" : ""
+      }`}
+    >
+      {variant === "watch" ? (
+        <WatchConnectIllustration />
+      ) : (
+        <Music size={24} aria-hidden="true" />
+      )}
       <strong>{title}</strong>
+      {subtitle ? (
+        <span className="library-empty-subtitle">{subtitle}</span>
+      ) : null}
     </div>
   );
 }

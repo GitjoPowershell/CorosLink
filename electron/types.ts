@@ -736,4 +736,8 @@ export interface AppUpdateSnapshot {
   /** macOS ad-hoc builds cannot self-install; user must open the release asset. */
   installMethod?: "restart" | "manual";
   manualInstallUrl?: string;
+  /** When false, the app does not check for updates automatically on startup. */
+  autoCheck: boolean;
+  /** When false, available updates are not downloaded until the user asks. */
+  autoDownload: boolean;
 }
