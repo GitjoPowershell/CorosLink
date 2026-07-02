@@ -186,6 +186,11 @@ export interface CorosLinkApi {
   validateRouteApiKey: (apiKey: string) => Promise<RouteApiKeyValidation>;
   getAppUpdateStatus: () => Promise<AppUpdateSnapshot>;
   checkForAppUpdates: () => Promise<AppUpdateSnapshot>;
+  downloadAppUpdate: () => Promise<AppUpdateSnapshot>;
+  setUpdatePreferences: (prefs: {
+    autoCheck?: boolean;
+    autoDownload?: boolean;
+  }) => Promise<AppUpdateSnapshot>;
   quitAndInstallUpdate: () => Promise<{ installMethod: "restart" | "manual" }>;
   onAppUpdateStatus: (
     callback: (snapshot: AppUpdateSnapshot) => void

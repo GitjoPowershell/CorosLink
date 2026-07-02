@@ -1,15 +1,30 @@
 import { execFileSync } from "node:child_process";
 import { app, BrowserWindow, shell } from "electron";
 import { autoUpdater } from "electron-updater";
+import { getSetting, setSetting } from "./database";
 import type { AppUpdateSnapshot } from "./types";
+
+const AUTO_CHECK_KEY = "updater.autoCheck";
+const AUTO_DOWNLOAD_KEY = "updater.autoDownload";
 
 let mainWindow: BrowserWindow | undefined;
 let listenersRegistered = false;
 let snapshot: AppUpdateSnapshot = {
   supported: false,
   currentVersion: app.getVersion(),
-  status: "idle"
+  status: "idle",
+  autoCheck: true,
+  autoDownload: true
 };
+
+function readBooleanSetting(key: string, fallback: boolean): boolean {
+  try {
+    const value = getSetting(key);
+    return value === undefined ? fallback : value === "true";
+  } catch {
+    return fallback;
+  }
+}
 
 function isUpdaterEnabled(): boolean {
   return app.isPackaged && !process.env.VITE_DEV_SERVER_URL;
@@ -120,7 +135,6 @@ function registerAutoUpdaterListeners(): void {
   }
 
   listenersRegistered = true;
-  autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
   autoUpdater.on("checking-for-update", () => {
@@ -172,11 +186,16 @@ function registerAutoUpdaterListeners(): void {
 export function initializeAppUpdater(window: BrowserWindow): void {
   mainWindow = window;
 
+  const autoCheck = readBooleanSetting(AUTO_CHECK_KEY, true);
+  const autoDownload = readBooleanSetting(AUTO_DOWNLOAD_KEY, true);
+
   if (!isUpdaterEnabled()) {
     snapshot = {
       supported: false,
       currentVersion: app.getVersion(),
-      status: "idle"
+      status: "idle",
+      autoCheck,
+      autoDownload
     };
     return;
   }
@@ -184,15 +203,20 @@ export function initializeAppUpdater(window: BrowserWindow): void {
   snapshot = {
     supported: true,
     currentVersion: app.getVersion(),
-    status: "idle"
+    status: "idle",
+    autoCheck,
+    autoDownload
   };
 
   registerAutoUpdaterListeners();
+  autoUpdater.autoDownload = autoDownload;
   publishSnapshot();
 
-  setTimeout(() => {
-    void checkForAppUpdates();
-  }, 5000);
+  if (autoCheck) {
+    setTimeout(() => {
+      void checkForAppUpdates();
+    }, 5000);
+  }
 }
 
 export async function checkForAppUpdates(): Promise<AppUpdateSnapshot> {
@@ -206,6 +230,48 @@ export async function checkForAppUpdates(): Promise<AppUpdateSnapshot> {
     setSnapshot({ status: "error", error: formatUpdaterError(error) });
   }
 
+  return getAppUpdateSnapshot();
+}
+
+export async function downloadAppUpdate(): Promise<AppUpdateSnapshot> {
+  if (!isUpdaterEnabled()) {
+    return getAppUpdateSnapshot();
+  }
+
+  if (snapshot.status === "downloading" || snapshot.status === "downloaded") {
+    return getAppUpdateSnapshot();
+  }
+
+  try {
+    setSnapshot({ status: "downloading", downloadPercent: 0, error: undefined });
+    await autoUpdater.downloadUpdate();
+  } catch (error) {
+    setSnapshot({ status: "error", error: formatUpdaterError(error) });
+  }
+
+  return getAppUpdateSnapshot();
+}
+
+export function setUpdaterPreferences(prefs: {
+  autoCheck?: boolean;
+  autoDownload?: boolean;
+}): AppUpdateSnapshot {
+  const next: Partial<AppUpdateSnapshot> = {};
+
+  if (typeof prefs.autoCheck === "boolean") {
+    setSetting(AUTO_CHECK_KEY, String(prefs.autoCheck));
+    next.autoCheck = prefs.autoCheck;
+  }
+
+  if (typeof prefs.autoDownload === "boolean") {
+    setSetting(AUTO_DOWNLOAD_KEY, String(prefs.autoDownload));
+    next.autoDownload = prefs.autoDownload;
+    if (isUpdaterEnabled()) {
+      autoUpdater.autoDownload = prefs.autoDownload;
+    }
+  }
+
+  setSnapshot(next);
   return getAppUpdateSnapshot();
 }
 

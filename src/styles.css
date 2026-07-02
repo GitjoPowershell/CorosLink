@@ -267,6 +267,98 @@ input::placeholder {
   color: #bfdbfe;
 }
 
+.update-chip.ready:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.app-update-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.update-settings {
+  position: relative;
+  display: inline-flex;
+}
+
+.update-settings-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.update-settings-trigger:hover,
+.update-settings-trigger[aria-expanded="true"] {
+  background: var(--glass-bg-hover);
+  color: var(--text-primary);
+}
+
+.update-settings-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 12px;
+  width: 260px;
+  padding: 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: rgba(18, 18, 20, 0.98);
+  box-shadow: var(--glass-shadow);
+}
+
+.update-settings-heading {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.update-settings-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.update-settings-option input {
+  margin-top: 2px;
+  flex-shrink: 0;
+  accent-color: #34d399;
+  cursor: pointer;
+}
+
+.update-settings-option-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.update-settings-option-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
 .watch-status-chip.connected {
   border-color: var(--success-border);
   background: var(--success-bg);
@@ -1114,16 +1206,36 @@ input::placeholder {
     0 20px 48px rgba(0, 0, 0, 0.32);
 }
 
-.library-panel--local {
+.library-panel--local,
+.library-panel--watch {
+  /* Keep the panels neutral — accent color comes from the eyebrow, pills,
+     status badges, and track thumbnails, not a colored background wash. */
   background:
-    linear-gradient(180deg, rgba(31, 135, 90, 0.18) 0%, rgba(9, 11, 10, 0.94) 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(9, 11, 10, 0.94) 44%),
     rgba(9, 11, 10, 0.94);
 }
 
-.library-panel--watch {
-  background:
-    linear-gradient(180deg, rgba(86, 118, 190, 0.14) 0%, rgba(9, 11, 10, 0.94) 42%),
-    rgba(9, 11, 10, 0.94);
+/* Accent-tinted eyebrows and count pills, matching the reference design. */
+.library-panel--local .library-panel-eyebrow,
+.library-panel--watch.is-connected .library-panel-eyebrow {
+  color: var(--success-text);
+}
+
+.library-panel--local .library-panel-header em,
+.library-panel--watch.is-connected .library-panel-header em {
+  border-color: rgba(110, 231, 168, 0.28);
+  background: rgba(45, 154, 116, 0.14);
+  color: var(--success-text);
+}
+
+.library-panel--watch.is-disconnected .library-panel-eyebrow {
+  color: #7ea6f0;
+}
+
+.library-panel--watch.is-disconnected .library-panel-header em {
+  border-color: rgba(96, 165, 250, 0.32);
+  background: rgba(59, 130, 246, 0.14);
+  color: #bfdbfe;
 }
 
 .library-panel-header {
@@ -1435,7 +1547,7 @@ input::placeholder {
 }
 
 .library-track-art--local {
-  background: linear-gradient(135deg, rgba(45, 154, 116, 0.9), rgba(216, 155, 34, 0.75));
+  background: linear-gradient(135deg, #2d9a74, #d89b22);
 }
 
 .library-track-art--watch {
@@ -1550,6 +1662,94 @@ input::placeholder {
   color: var(--text-secondary);
   font-size: 14px;
   font-weight: 600;
+}
+
+.library-empty-state--watch {
+  gap: 6px;
+  min-height: 320px;
+}
+
+.library-empty-state--watch svg {
+  opacity: 1;
+}
+
+.library-empty-subtitle {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.watch-connect-illustration {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(300px, 78%);
+  aspect-ratio: 1;
+  margin-bottom: 10px;
+}
+
+.watch-connect-art {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.watch-connect-note {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.watch-line {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.5);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.watch-line--faint {
+  stroke: rgba(255, 255, 255, 0.2);
+  stroke-width: 1.5;
+}
+
+.watch-ring {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.28);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-dasharray: 1 10;
+  animation: watch-ring-spin 40s linear infinite;
+  transform-origin: 130px 130px;
+}
+
+.watch-dot--amber {
+  fill: rgba(216, 155, 34, 0.85);
+}
+
+.watch-dot--green {
+  fill: rgba(45, 154, 116, 0.85);
+}
+
+.watch-dot--teal {
+  fill: rgba(52, 211, 153, 0.8);
+}
+
+.watch-dot--muted {
+  fill: rgba(255, 255, 255, 0.32);
+}
+
+@keyframes watch-ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .watch-ring {
+    animation: none;
+  }
 }
 
 .download-form {
@@ -2501,6 +2701,21 @@ td span {
 .app-select--pill .app-select-trigger:hover,
 .app-select--pill .app-select-trigger[aria-expanded="true"] {
   background: rgba(255, 255, 255, 0.08);
+}
+
+.app-select--watch-smoke .app-select-trigger {
+  border-color: rgba(255, 180, 80, 0.35);
+  background: rgba(255, 180, 80, 0.08);
+}
+
+.app-select--watch-smoke .app-select-trigger:hover,
+.app-select--watch-smoke .app-select-trigger[aria-expanded="true"] {
+  border-color: rgba(255, 180, 80, 0.55);
+  background: rgba(255, 180, 80, 0.12);
+}
+
+.app-select--watch-smoke .app-select-menu {
+  min-width: 180px;
 }
 
 .app-select--pill .app-select-menu {
@@ -5632,10 +5847,11 @@ td span {
 
 .training-heatmap-scroll {
   width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
+  /* overflow must stay visible so the hover tooltip (which pops above the
+     top-row cells) is not clipped. The grid columns are minmax(0, 1fr) and
+     always shrink to fit, so this never overflows horizontally. */
+  overflow: visible;
   padding: 4px 2px 8px;
-  scrollbar-width: thin;
 }
 
 .training-heatmap-layout {

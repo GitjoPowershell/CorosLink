@@ -315,6 +315,13 @@ const api = {
     ipcRenderer.invoke("app:getUpdateStatus"),
   checkForAppUpdates: (): Promise<AppUpdateSnapshot> =>
     ipcRenderer.invoke("app:checkForUpdates"),
+  downloadAppUpdate: (): Promise<AppUpdateSnapshot> =>
+    ipcRenderer.invoke("app:downloadUpdate"),
+  setUpdatePreferences: (prefs: {
+    autoCheck?: boolean;
+    autoDownload?: boolean;
+  }): Promise<AppUpdateSnapshot> =>
+    ipcRenderer.invoke("app:setUpdatePreferences", prefs),
   quitAndInstallUpdate: (): Promise<void> =>
     ipcRenderer.invoke("app:quitAndInstallUpdate"),
   onAppUpdateStatus: (

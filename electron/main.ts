@@ -116,9 +116,11 @@ import {
 } from "./appleMusicService";
 import {
   checkForAppUpdates,
+  downloadAppUpdate,
   getAppUpdateSnapshot,
   initializeAppUpdater,
-  quitAndInstallUpdate
+  quitAndInstallUpdate,
+  setUpdaterPreferences
 } from "./updaterService";
 
 let mainWindow: BrowserWindow | undefined;
@@ -561,6 +563,14 @@ function registerIpcHandlers(): void {
   ipcMain.handle("app:getUpdateStatus", () => getAppUpdateSnapshot());
 
   ipcMain.handle("app:checkForUpdates", () => checkForAppUpdates());
+
+  ipcMain.handle("app:downloadUpdate", () => downloadAppUpdate());
+
+  ipcMain.handle(
+    "app:setUpdatePreferences",
+    (_event, prefs: { autoCheck?: boolean; autoDownload?: boolean }) =>
+      setUpdaterPreferences(prefs)
+  );
 
   ipcMain.handle("app:quitAndInstallUpdate", () => quitAndInstallUpdate());
 }
