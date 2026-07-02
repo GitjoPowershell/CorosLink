@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-07-02
+
 ### Added
 
+- **Remember COROS credentials** — an opt-in "Remember me" toggle on the Training Hub login stores your credentials with OS-native encryption (Keychain / DPAPI / libsecret) so CorosLink signs back in automatically when the COROS session token expires, instead of prompting for email and password again (#4)
 - **Update preferences** — a settings menu next to the version chip to toggle automatic update checks and automatic downloads. With auto-download off, CorosLink surfaces a **Download** button so you choose when to fetch an available update (#2)
 
 ### Fixed
@@ -136,6 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - GitHub Actions release workflow and installer build documentation
 
+[0.1.12]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.8...v0.1.9
