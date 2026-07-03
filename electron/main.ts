@@ -113,8 +113,14 @@ import {
   getAppleMusicStatus,
   listAppleMusicPlaylists,
   logoutAppleMusic,
-  saveAppleMusicAuth
+  saveAppleMusicAuth,
+  saveAppleMusicCapturedHeaders
 } from "./appleMusicService";
+import {
+  configureAppleMusicBrowserSession,
+  registerAppleMusicBrowserHandlers,
+  resetAppleMusicBrowserSession
+} from "./appleMusicBrowserService";
 import {
   checkForAppUpdates,
   downloadAppUpdate,
@@ -219,6 +225,15 @@ app.whenReady().then(() => {
   configureAppPermissions();
   configureYouTubeBrowserSession();
   registerYouTubeBrowserHandlers();
+  configureAppleMusicBrowserSession();
+  registerAppleMusicBrowserHandlers((headers) => {
+    // Fires on every amp-api call; only tell the renderer when the stored
+    // credentials actually change (e.g. the media-user-token first appears).
+    const { status, changed } = saveAppleMusicCapturedHeaders(headers);
+    if (changed && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("appleMusic:authCaptured", status);
+    }
+  });
   initializeDatabase(app.getPath("userData"));
   registerIpcHandlers();
   setJobListener((jobs) => {
@@ -373,6 +388,10 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle("appleMusic:logout", () => logoutAppleMusic());
+
+  ipcMain.handle("appleMusic:resetBrowserSession", () =>
+    resetAppleMusicBrowserSession()
+  );
 
   ipcMain.handle("appleMusic:listPlaylists", () => listAppleMusicPlaylists());
 
