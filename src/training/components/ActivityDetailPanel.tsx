@@ -19,7 +19,6 @@ interface ActivityDetailPanelProps {
   detail: TrainingHubActivityDetail | null;
   listActivity: TrainingHubActivity | null;
   sportTypes: TrainingHubSportType[];
-  fileUrl: string | null;
   busy?: string | null;
   embedded?: boolean;
 }
@@ -61,7 +60,6 @@ export function ActivityDetailPanel({
   detail,
   listActivity,
   sportTypes,
-  fileUrl,
   busy = null,
   embedded = false
 }: ActivityDetailPanelProps) {
@@ -86,24 +84,6 @@ export function ActivityDetailPanel({
   const panelClassName = embedded
     ? "training-activities-detail-inner"
     : "panel training-detail-panel";
-
-  if (fileUrl) {
-    return (
-      <div className={panelClassName}>
-        <div className="section-heading compact">
-          <div>
-            <p className="eyebrow">Activity Detail</p>
-            <h2>Activity file URL</h2>
-          </div>
-        </div>
-        <div className="training-file-url">
-          <a href={fileUrl} target="_blank" rel="noreferrer">
-            {fileUrl}
-          </a>
-        </div>
-      </div>
-    );
-  }
 
   if (isLoading) {
     return (

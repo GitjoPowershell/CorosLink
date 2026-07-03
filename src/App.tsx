@@ -64,6 +64,7 @@ import type {
   AppleMusicStatus,
   AppleMusicTrack,
 } from "../electron/types";
+import { TRAINING_HUB_EXPORT_FORMATS } from "../electron/types";
 import { buildTrainingHubSnapshot } from "./training/parsers";
 import { fetchTrainingDashboard, fetchUpcomingWorkouts } from "./training/api";
 import { TRAINING_HEATMAP_DAYS } from "./training/chartConfig";
@@ -72,6 +73,7 @@ import { TrainingHubView } from "./training/TrainingHubView";
 import type { TrainingHubSnapshot } from "./training/types";
 import type { CorosLinkApi } from "./coroslink-api";
 import { AppUpdateControls } from "./components/AppUpdateControls";
+import { ResourcesMenu } from "./components/ResourcesMenu";
 import { WatchConnectionSmokeControls } from "./components/WatchConnectionSmokeControls";
 import { MapsView } from "./maps/MapsView";
 import {
@@ -171,9 +173,6 @@ export default function App() {
     useState<TrainingHubActivityDetail | null>(null);
   const [selectedTrainingHubActivity, setSelectedTrainingHubActivity] =
     useState<TrainingHubActivity | null>(null);
-  const [trainingHubFileUrl, setTrainingHubFileUrl] = useState<string | null>(
-    null,
-  );
   const [url, setUrl] = useState("");
   const [autoTransfer, setAutoTransfer] = useState(true);
   const autoTransferRef = useRef(autoTransfer);
@@ -276,7 +275,6 @@ export default function App() {
     setTrainingHubUpcomingWorkouts([]);
     setTrainingHubActivityDetail(null);
     setSelectedTrainingHubActivity(null);
-    setTrainingHubFileUrl(null);
   }, []);
 
   const loadTrainingHubData = useCallback(async () => {
@@ -387,7 +385,6 @@ export default function App() {
             activity,
           ),
         );
-        setTrainingHubFileUrl(null);
       } catch (caught) {
         setError(toErrorMessage(caught));
       } finally {
@@ -905,7 +902,7 @@ export default function App() {
     }
   }
 
-  async function handleTrainingHubFileUrl(
+  async function handleTrainingHubExport(
     activity: TrainingHubActivity,
     fileType: TrainingHubActivityFileType,
   ) {
@@ -913,19 +910,27 @@ export default function App() {
       return;
     }
 
+    const format = TRAINING_HUB_EXPORT_FORMATS.find(
+      (item) => item.fileType === fileType,
+    );
+
     setBusy(`training-file:${activity.activityId}:${fileType}`);
     setError(null);
     setMessage(null);
 
     try {
-      const fileUrl = await api.getTrainingHubActivityFileUrl(
+      const result = await api.exportTrainingHubActivityFile(
         activity.activityId,
         activity.sportType,
         fileType,
+        activity.name,
       );
-      setTrainingHubFileUrl(fileUrl);
-      setTrainingHubActivityDetail(null);
-      setMessage("COROS activity file URL ready.");
+
+      if (result.saved) {
+        setMessage(
+          `Saved ${format?.label ?? "activity"} file to ${result.filePath}.`,
+        );
+      }
     } catch (caught) {
       setError(toErrorMessage(caught));
       const status = await api.getTrainingHubStatus();
@@ -1347,6 +1352,7 @@ export default function App() {
         </div>
 
         <div className="app-header-end">
+          <ResourcesMenu />
           <AppUpdateControls
             snapshot={appUpdateSnapshot}
             busy={busy === "update-check"}
@@ -1520,7 +1526,6 @@ export default function App() {
                 sportTypes={trainingHubSportTypes}
                 activityDetail={trainingHubActivityDetail}
                 selectedActivity={selectedTrainingHubActivity}
-                fileUrl={trainingHubFileUrl}
                 busy={busy}
                 onEmailChange={setTrainingHubEmail}
                 onPasswordChange={setTrainingHubPassword}
@@ -1529,7 +1534,7 @@ export default function App() {
                 onLogout={handleTrainingHubLogout}
                 onRefresh={handleTrainingHubRefresh}
                 onLoadDetail={handleTrainingHubActivityDetail}
-                onGetFileUrl={handleTrainingHubFileUrl}
+                onExportFile={handleTrainingHubExport}
               />
             )}
           </>

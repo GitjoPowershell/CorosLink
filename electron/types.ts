@@ -521,7 +521,60 @@ export interface TrainingHubStatus {
   email?: string;
 }
 
-export type TrainingHubActivityFileType = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+// COROS `/activity/detail/download` file-type codes. Verified against the live
+// teamapi.coros.com endpoint: 0=CSV, 1=GPX, 2=KML, 3=TCX, 4=FIT (5/6 are rejected).
+export type TrainingHubActivityFileType = 0 | 1 | 2 | 3 | 4;
+
+export interface TrainingHubExportFormat {
+  fileType: TrainingHubActivityFileType;
+  /** Short label shown in the UI, e.g. "GPX". */
+  label: string;
+  /** Lower-case file extension without a leading dot, e.g. "gpx". */
+  extension: string;
+  /** One-line hint describing what the format is good for. */
+  description: string;
+}
+
+// Ordered for the export menu: the everyday formats first, raw data last.
+export const TRAINING_HUB_EXPORT_FORMATS: readonly TrainingHubExportFormat[] = [
+  {
+    fileType: 4,
+    label: "FIT",
+    extension: "fit",
+    description: "Original COROS activity file"
+  },
+  {
+    fileType: 1,
+    label: "GPX",
+    extension: "gpx",
+    description: "GPS track for GPX Studio, Plotaroute, sharing"
+  },
+  {
+    fileType: 3,
+    label: "TCX",
+    extension: "tcx",
+    description: "Training Center XML with heart rate & laps"
+  },
+  {
+    fileType: 2,
+    label: "KML",
+    extension: "kml",
+    description: "Route for Google Earth"
+  },
+  {
+    fileType: 0,
+    label: "CSV",
+    extension: "csv",
+    description: "Raw data points as a spreadsheet"
+  }
+];
+
+export interface TrainingHubExportResult {
+  /** False when the user cancelled the save dialog. */
+  saved: boolean;
+  /** Absolute path the file was written to, when saved. */
+  filePath?: string;
+}
 
 export interface TrainingHubActivity {
   activityId: string;

@@ -28,6 +28,7 @@ import type {
   TrainingHubActivity,
   TrainingHubActivityDetail,
   TrainingHubActivityFileType,
+  TrainingHubExportResult,
   TrainingHubAnalytics,
   TrainingHubDailyMetrics,
   TrainingHubDashboard,
@@ -131,11 +132,12 @@ export interface CorosLinkApi {
     sportType: number,
     listActivity?: TrainingHubActivity
   ) => Promise<TrainingHubActivityDetail>;
-  getTrainingHubActivityFileUrl: (
+  exportTrainingHubActivityFile: (
     activityId: string,
     sportType: number,
-    fileType: TrainingHubActivityFileType
-  ) => Promise<string>;
+    fileType: TrainingHubActivityFileType,
+    suggestedName?: string
+  ) => Promise<TrainingHubExportResult>;
   getTrainingAnalytics: () => Promise<TrainingHubAnalytics>;
   getRacePredictor: () => Promise<TrainingHubRacePredictor>;
   getTrainingDashboard: () => Promise<TrainingHubDashboard>;

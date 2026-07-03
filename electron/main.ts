@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { deleteDownload, getDownloadById, initializeDatabase, listDownloads, markDownloadTransferred, clearDownloadTransferredByFileName } from "./database";
@@ -29,8 +29,8 @@ import {
   getSportTypeMap,
   getTrainingAnalytics,
   getTrainingDashboard,
+  fetchTrainingHubActivityFile,
   getTrainingHubActivityDetail,
-  getTrainingHubActivityFileUrl,
   getTrainingHubStatus,
   getUpcomingWorkouts,
   listTrainingHubActivities,
@@ -76,6 +76,7 @@ import type {
   SpotifyConfig,
   TrainingHubActivity,
   TrainingHubActivityFileType,
+  TrainingHubExportResult,
   WatchConnectionSmokeOptionId,
   YouTubeMusicConfig
 } from "./types";
@@ -124,6 +125,19 @@ import {
 } from "./updaterService";
 
 let mainWindow: BrowserWindow | undefined;
+
+// Turns an activity name into a filesystem-safe base name for export downloads.
+function sanitizeExportFileName(name?: string): string {
+  if (!name) {
+    return "";
+  }
+
+  return name
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+}
 
 function getAppIconPath(): string | undefined {
   const candidates =
@@ -423,13 +437,42 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(
-    "trainingHub:getActivityFileUrl",
-    (
+    "trainingHub:exportActivityFile",
+    async (
       _event,
       activityId: string,
       sportType: number,
-      fileType: TrainingHubActivityFileType
-    ) => getTrainingHubActivityFileUrl(activityId, sportType, fileType)
+      fileType: TrainingHubActivityFileType,
+      suggestedName?: string
+    ): Promise<TrainingHubExportResult> => {
+      const { format, content } = await fetchTrainingHubActivityFile(
+        activityId,
+        sportType,
+        fileType
+      );
+
+      const baseName =
+        sanitizeExportFileName(suggestedName) || `activity-${activityId}`;
+      const defaultPath = `${baseName}.${format.extension}`;
+
+      const saveOptions = {
+        defaultPath,
+        filters: [
+          { name: `${format.label} file`, extensions: [format.extension] }
+        ]
+      };
+      const result =
+        mainWindow && !mainWindow.isDestroyed()
+          ? await dialog.showSaveDialog(mainWindow, saveOptions)
+          : await dialog.showSaveDialog(saveOptions);
+
+      if (result.canceled || !result.filePath) {
+        return { saved: false };
+      }
+
+      await fs.promises.writeFile(result.filePath, content);
+      return { saved: true, filePath: result.filePath };
+    }
   );
 
   ipcMain.handle("trainingHub:getTrainingAnalytics", () =>

@@ -80,7 +80,6 @@ export interface TrainingHubViewProps {
   sportTypes: TrainingHubSportType[];
   activityDetail: TrainingHubActivityDetail | null;
   selectedActivity: TrainingHubActivity | null;
-  fileUrl: string | null;
   busy: string | null;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
@@ -89,7 +88,7 @@ export interface TrainingHubViewProps {
   onLogout: () => void;
   onRefresh: () => void;
   onLoadDetail: (activity: TrainingHubActivity) => void;
-  onGetFileUrl: (
+  onExportFile: (
     activity: TrainingHubActivity,
     fileType: TrainingHubActivityFileType
   ) => void;

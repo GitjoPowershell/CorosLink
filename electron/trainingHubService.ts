@@ -15,6 +15,7 @@ import type {
   TrainingHubActivityDetail,
   TrainingHubActivityFileType,
   TrainingHubActivityLap,
+  TrainingHubExportFormat,
   TrainingHubActivityTrack,
   TrainingHubTrackPoint,
   TrainingHubAnalytics,
@@ -35,6 +36,7 @@ import type {
   TrainingHubZoneDistributionEntry,
   TrainingHubZoneDistributions
 } from "./types";
+import { TRAINING_HUB_EXPORT_FORMATS } from "./types";
 
 interface LoginResult {
   loginData: TrainingHubLoginData;
@@ -446,6 +448,45 @@ export async function getTrainingHubActivityFileUrl(
   }
 
   return data.fileUrl;
+}
+
+export function getTrainingHubExportFormat(
+  fileType: TrainingHubActivityFileType
+): TrainingHubExportFormat {
+  const format = TRAINING_HUB_EXPORT_FORMATS.find(
+    (item) => item.fileType === fileType
+  );
+
+  if (!format) {
+    throw new Error(`Unsupported COROS export file type: ${fileType}`);
+  }
+
+  return format;
+}
+
+// Resolves the COROS S3 URL for the requested format and downloads the raw file
+// so the main process can write it to disk via a save dialog.
+export async function fetchTrainingHubActivityFile(
+  activityId: string,
+  sportType: number,
+  fileType: TrainingHubActivityFileType
+): Promise<{ format: TrainingHubExportFormat; content: Buffer }> {
+  const format = getTrainingHubExportFormat(fileType);
+  const fileUrl = await getTrainingHubActivityFileUrl(
+    activityId,
+    sportType,
+    fileType
+  );
+
+  const response = await fetch(fileUrl);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to download the ${format.label} file (HTTP ${response.status}).`
+    );
+  }
+
+  const content = Buffer.from(await response.arrayBuffer());
+  return { format, content };
 }
 
 export async function getTrainingAnalytics(): Promise<TrainingHubAnalytics> {

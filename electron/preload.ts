@@ -29,6 +29,7 @@ import type {
   TrainingHubActivity,
   TrainingHubActivityDetail,
   TrainingHubActivityFileType,
+  TrainingHubExportResult,
   TrainingHubAnalytics,
   TrainingHubDailyMetrics,
   TrainingHubDashboard,
@@ -197,16 +198,18 @@ const api = {
       sportType,
       listActivity
     ),
-  getTrainingHubActivityFileUrl: (
+  exportTrainingHubActivityFile: (
     activityId: string,
     sportType: number,
-    fileType: TrainingHubActivityFileType
-  ): Promise<string> =>
+    fileType: TrainingHubActivityFileType,
+    suggestedName?: string
+  ): Promise<TrainingHubExportResult> =>
     ipcRenderer.invoke(
-      "trainingHub:getActivityFileUrl",
+      "trainingHub:exportActivityFile",
       activityId,
       sportType,
-      fileType
+      fileType,
+      suggestedName
     ),
   getTrainingAnalytics: (): Promise<TrainingHubAnalytics> =>
     ipcRenderer.invoke("trainingHub:getTrainingAnalytics"),

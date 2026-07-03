@@ -44,7 +44,6 @@ export function TrainingHubView({
   sportTypes,
   activityDetail,
   selectedActivity,
-  fileUrl,
   busy,
   onEmailChange,
   onPasswordChange,
@@ -53,7 +52,7 @@ export function TrainingHubView({
   onLogout,
   onRefresh,
   onLoadDetail,
-  onGetFileUrl
+  onExportFile
 }: TrainingHubViewProps) {
   const connected = Boolean(status?.authenticated);
   const [showConnectionDetails, setShowConnectionDetails] = useState(false);
@@ -387,7 +386,7 @@ export function TrainingHubView({
                   selectedActivityId={selectedActivity?.activityId ?? null}
                   busy={busy}
                   onLoadDetail={onLoadDetail}
-                  onGetFileUrl={onGetFileUrl}
+                  onExportFile={onExportFile}
                 />
               </div>
               <div className="training-activities-detail">
@@ -395,7 +394,6 @@ export function TrainingHubView({
                   detail={activityDetail}
                   listActivity={selectedActivity}
                   sportTypes={sportTypes}
-                  fileUrl={fileUrl}
                   busy={busy}
                   embedded
                 />
