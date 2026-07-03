@@ -97,6 +97,10 @@ export interface CorosLinkApi {
   getAppleMusicStatus: () => Promise<AppleMusicStatus>;
   saveAppleMusicAuth: (headersRaw: string) => Promise<AppleMusicStatus>;
   logoutAppleMusic: () => Promise<AppleMusicStatus>;
+  resetAppleMusicBrowserSession: () => Promise<void>;
+  onAppleMusicAuthCaptured: (
+    callback: (status: AppleMusicStatus) => void
+  ) => () => void;
   listAppleMusicPlaylists: () => Promise<AppleMusicPlaylist[]>;
   fetchAppleMusicPlaylist: (playlist: string) => Promise<AppleMusicPlaylist>;
   getSpotifyConfig: () => Promise<SpotifyConfig>;

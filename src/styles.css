@@ -10116,6 +10116,59 @@ td span {
   border: 0;
 }
 
+.apple-music-signin {
+  gap: 18px;
+}
+
+.apple-music-login {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: #0f0f0f;
+}
+
+.apple-music-login-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2, rgba(255, 255, 255, 0.02));
+}
+
+.apple-music-login-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.apple-music-login-frame {
+  flex: none;
+  height: clamp(440px, 64vh, 760px);
+  min-height: 440px;
+}
+
+.apple-music-signin-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.apple-music-signin-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .browser-download-overlay {
   position: absolute;
   top: 16px;

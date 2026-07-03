@@ -4329,6 +4329,123 @@ function EmptyState({ title }: { title: string }) {
   );
 }
 
+const APPLE_MUSIC_LOGIN_URL = "https://music.apple.com/login";
+const APPLE_MUSIC_HOME_URL = "https://music.apple.com/";
+
+// Hosts music.apple.com inside its own persistent Electron session. The main
+// process watches this session's amp-api traffic and lifts the auth headers as
+// soon as the user signs in (see appleMusicBrowserService.ts), so this
+// component only has to render the page and offer basic navigation.
+function AppleMusicLoginBrowser() {
+  const webviewRef = useRef<WebviewElement | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [webviewKey, setWebviewKey] = useState(0);
+  const [currentUrl, setCurrentUrl] = useState(APPLE_MUSIC_LOGIN_URL);
+  const [resetting, setResetting] = useState(false);
+
+  useEffect(() => {
+    const webview = webviewRef.current;
+    if (!webview) {
+      return;
+    }
+
+    const handleDomReady = () => setLoading(false);
+    const handleStartLoading = () => setLoading(true);
+    const handleStopLoading = () => {
+      setLoading(false);
+      setCurrentUrl(webview.getURL() || APPLE_MUSIC_LOGIN_URL);
+    };
+    const handleNavigate = () =>
+      setCurrentUrl(webview.getURL() || APPLE_MUSIC_LOGIN_URL);
+
+    webview.addEventListener("dom-ready", handleDomReady);
+    webview.addEventListener("did-start-loading", handleStartLoading);
+    webview.addEventListener("did-stop-loading", handleStopLoading);
+    webview.addEventListener("did-navigate", handleNavigate);
+    webview.addEventListener("did-navigate-in-page", handleNavigate);
+
+    return () => {
+      webview.removeEventListener("dom-ready", handleDomReady);
+      webview.removeEventListener("did-start-loading", handleStartLoading);
+      webview.removeEventListener("did-stop-loading", handleStopLoading);
+      webview.removeEventListener("did-navigate", handleNavigate);
+      webview.removeEventListener("did-navigate-in-page", handleNavigate);
+    };
+  }, [webviewKey]);
+
+  async function handleReset() {
+    setResetting(true);
+    setLoading(true);
+    try {
+      await window.corosLink?.resetAppleMusicBrowserSession();
+    } finally {
+      setResetting(false);
+      // Remount the webview so it reloads from the freshly cleared session.
+      setCurrentUrl(APPLE_MUSIC_LOGIN_URL);
+      setWebviewKey((value) => value + 1);
+    }
+  }
+
+  return (
+    <div className="apple-music-login">
+      <div className="apple-music-login-toolbar">
+        <div className="browser-nav">
+          <button
+            className="icon-button"
+            type="button"
+            title="Reload"
+            onClick={() => webviewRef.current?.reload()}
+          >
+            <RefreshCw size={16} aria-hidden="true" />
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            title="Apple Music home"
+            onClick={() => void webviewRef.current?.loadURL(APPLE_MUSIC_HOME_URL)}
+          >
+            <Home size={16} aria-hidden="true" />
+          </button>
+        </div>
+        <span className="apple-music-login-url" title={currentUrl}>
+          {currentUrl}
+        </span>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={resetting}
+          onClick={() => void handleReset()}
+        >
+          {resetting ? (
+            <Loader2 className="spin" size={15} aria-hidden="true" />
+          ) : (
+            <LogOut size={15} aria-hidden="true" />
+          )}
+          Reset session
+        </button>
+      </div>
+      <div className="webview-frame apple-music-login-frame">
+        <webview
+          key={webviewKey}
+          ref={(element) => {
+            webviewRef.current = element as WebviewElement | null;
+            element?.setAttribute("allowpopups", "");
+          }}
+          className="youtube-webview apple-music-webview"
+          src={APPLE_MUSIC_LOGIN_URL}
+          partition="persist:coroslink-apple"
+          webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=no"
+        />
+        {loading ? (
+          <div className="browser-loading">
+            <Loader2 className="spin" size={24} aria-hidden="true" />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function AppleMusicView({
   onMessage,
   onError,
@@ -4349,6 +4466,9 @@ function AppleMusicView({
   const [busy, setBusy] = useState<
     "auth" | "logout" | "list" | "tracks" | null
   >(null);
+  // Default to the in-app browser sign-in; the manual header paste stays as a
+  // fallback for anyone whose login the embedded browser can't complete.
+  const [authMode, setAuthMode] = useState<"browser" | "manual">("browser");
   const [loadingPlaylistId, setLoadingPlaylistId] = useState<string | null>(
     null,
   );
@@ -4432,6 +4552,23 @@ function AppleMusicView({
       .catch((caught: unknown) => setError(toErrorMessage(caught)));
   }, [api]);
 
+  // The main process lifts credentials out of the embedded music.apple.com
+  // session and notifies us when they change (e.g. once the user signs in and
+  // the media-user-token first appears).
+  useEffect(() => {
+    if (!api) {
+      return;
+    }
+    return api.onAppleMusicAuthCaptured((next) => {
+      setStatus(next);
+      setNotice(
+        next.hasUserToken
+          ? "Apple Music connected — your library is ready."
+          : "Signed in to Apple Music.",
+      );
+    });
+  }, [api, setNotice]);
+
   useEffect(() => {
     if (status?.authenticated && status.hasUserToken) {
       void refreshPlaylists();
@@ -4480,6 +4617,11 @@ function AppleMusicView({
   if (!api) {
     return null;
   }
+
+  // A catalog-only credential (developer token without a media-user-token)
+  // isn't usefully connected — keep showing the sign-in flow so the user can
+  // finish logging in and capture the library token.
+  const connected = Boolean(status?.authenticated && status.hasUserToken);
 
   const selectedSummary = selectedId
     ? playlists.find((playlist) => playlist.id === selectedId)
@@ -4552,7 +4694,14 @@ function AppleMusicView({
     setBusy("logout");
     setError(null);
     try {
-      setStatus(await api.logoutAppleMusic());
+      // Clear the stored credentials *and* the persisted Apple Music browser
+      // session, otherwise the webview stays signed in and a fresh capture
+      // would silently reconnect the same account.
+      const [next] = await Promise.all([
+        api.logoutAppleMusic(),
+        api.resetAppleMusicBrowserSession(),
+      ]);
+      setStatus(next);
       setPlaylists([]);
       setSelectedId("");
       setDetailCache({});
@@ -4577,12 +4726,12 @@ function AppleMusicView({
     <div className="stack stack-fill">
       <section
         className={
-          status?.authenticated
+          connected
             ? "panel spotify-account-panel"
             : "panel spotify-account-panel music-connect-panel"
         }
       >
-        {status?.authenticated ? (
+        {connected ? (
           <div className="spotify-account-card apple-music-account-card">
             <div
               className="spotify-account-mark apple-music-account-mark"
@@ -4594,30 +4743,26 @@ function AppleMusicView({
               <p className="eyebrow">Apple Music</p>
               <h2>Connected</h2>
               <span>
-                {status.hasUserToken
-                  ? "Catalog + library access"
-                  : "Catalog access only"}
-                {status.authUpdatedAt
+                Catalog + library access
+                {status?.authUpdatedAt
                   ? ` · Saved ${formatDate(status.authUpdatedAt)}`
                   : ""}
               </span>
             </div>
             <div className="topbar-actions">
-              {status.hasUserToken ? (
-                <button
-                  className="primary-button"
-                  type="button"
-                  disabled={busy === "list"}
-                  onClick={() => void refreshPlaylists()}
-                >
-                  {busy === "list" ? (
-                    <Loader2 className="spin" size={17} aria-hidden="true" />
-                  ) : (
-                    <RefreshCw size={17} aria-hidden="true" />
-                  )}
-                  Refresh
-                </button>
-              ) : null}
+              <button
+                className="primary-button"
+                type="button"
+                disabled={busy === "list"}
+                onClick={() => void refreshPlaylists()}
+              >
+                {busy === "list" ? (
+                  <Loader2 className="spin" size={17} aria-hidden="true" />
+                ) : (
+                  <RefreshCw size={17} aria-hidden="true" />
+                )}
+                Refresh
+              </button>
               <button
                 className="secondary-button"
                 type="button"
@@ -4630,6 +4775,43 @@ function AppleMusicView({
                   <LogOut size={17} aria-hidden="true" />
                 )}
                 Disconnect
+              </button>
+            </div>
+          </div>
+        ) : authMode === "browser" ? (
+          <div className="youtube-music-connect youtube-music-connect--apple apple-music-signin">
+            <div className="youtube-music-connect-header">
+              <div
+                className="youtube-music-connect-mark apple-music-connect-mark"
+                aria-hidden="true"
+              >
+                <AppleBrandIcon size={28} />
+              </div>
+              <div className="youtube-music-connect-intro">
+                <p className="eyebrow">Apple Music</p>
+                <h2>Sign in to connect</h2>
+                <span>
+                  Sign in below, then open your <strong>Library</strong> —
+                  CorosLink captures the access it needs automatically. No
+                  DevTools and no Apple Developer account required.
+                </span>
+              </div>
+            </div>
+
+            <AppleMusicLoginBrowser />
+
+            <div className="apple-music-signin-footer">
+              <span className="youtube-music-connect-note">
+                Sign-in happens in a private, in-app Apple Music session. Your
+                credentials stay on this device and are only used to read
+                playlist metadata.
+              </span>
+              <button
+                className="text-button"
+                type="button"
+                onClick={() => setAuthMode("manual")}
+              >
+                Paste headers manually instead
               </button>
             </div>
           </div>
@@ -4651,6 +4833,15 @@ function AppleMusicView({
                 </span>
               </div>
             </div>
+
+            <button
+              className="text-button apple-music-signin-back"
+              type="button"
+              onClick={() => setAuthMode("browser")}
+            >
+              <ArrowLeft size={15} aria-hidden="true" />
+              Back to in-app sign in
+            </button>
 
             <ol className="youtube-music-steps">
               <li>
@@ -4726,20 +4917,7 @@ function AppleMusicView({
         )}
       </section>
 
-      {status?.authenticated && !status.hasUserToken ? (
-        <section className="panel youtube-music-empty">
-          <div className="empty-state">
-            <ListMusic size={26} aria-hidden="true" />
-            <strong>Library access needed</strong>
-            <span>
-              Re-copy your headers while signed in to music.apple.com so they
-              include the <code>media-user-token</code>, then reconnect.
-            </span>
-          </div>
-        </section>
-      ) : null}
-
-      {status?.authenticated && status.hasUserToken ? (
+      {connected ? (
         playlists.length === 0 ? (
           <section className="panel youtube-music-empty">
             <div className="empty-state">

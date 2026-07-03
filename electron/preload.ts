@@ -136,6 +136,21 @@ const api = {
     ipcRenderer.invoke("appleMusic:saveAuth", headersRaw),
   logoutAppleMusic: (): Promise<AppleMusicStatus> =>
     ipcRenderer.invoke("appleMusic:logout"),
+  resetAppleMusicBrowserSession: (): Promise<void> =>
+    ipcRenderer.invoke("appleMusic:resetBrowserSession"),
+  onAppleMusicAuthCaptured: (
+    callback: (status: AppleMusicStatus) => void
+  ): (() => void) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      status: AppleMusicStatus
+    ) => {
+      callback(status);
+    };
+    ipcRenderer.on("appleMusic:authCaptured", listener);
+    return () =>
+      ipcRenderer.removeListener("appleMusic:authCaptured", listener);
+  },
   listAppleMusicPlaylists: (): Promise<AppleMusicPlaylist[]> =>
     ipcRenderer.invoke("appleMusic:listPlaylists"),
   fetchAppleMusicPlaylist: (playlist: string): Promise<AppleMusicPlaylist> =>

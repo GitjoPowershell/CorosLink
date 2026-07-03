@@ -55,6 +55,56 @@ export function saveAppleMusicAuth(headersRaw: string): AppleMusicStatus {
   return getAppleMusicStatus();
 }
 
+/**
+ * Stores credentials lifted automatically from music.apple.com's amp-api traffic
+ * (see appleMusicBrowserService.ts). The capture fires on every API call, so a
+ * given request may only carry a subset of the headers — merge with anything
+ * already stored and never downgrade (e.g. don't drop a known media-user-token
+ * just because one catalog request lacked it). Returns the current status, and
+ * whether this call actually changed the stored credentials.
+ */
+export function saveAppleMusicCapturedHeaders(headers: {
+  authorization?: string;
+  "media-user-token"?: string;
+  cookie?: string;
+}): { status: AppleMusicStatus; changed: boolean } {
+  const developerToken = (headers.authorization ?? "")
+    .replace(/^bearer\s+/i, "")
+    .trim();
+  if (!developerToken) {
+    return { status: getAppleMusicStatus(), changed: false };
+  }
+
+  const existing = readStoredCredentials();
+  const merged: AppleMusicCredentials = {
+    developerToken,
+    userToken: headers["media-user-token"]?.trim() || existing?.userToken,
+    cookie: headers.cookie?.trim() || existing?.cookie,
+    storefront: existing?.storefront
+  };
+
+  // The developer token rides on every amp-api request, including catalog
+  // browsing before sign-in. Ignore those: without a media-user-token there is
+  // no library access, and saving anyway would prematurely flip the UI to
+  // "connected" and tear down the sign-in browser mid-login.
+  if (!merged.userToken) {
+    return { status: getAppleMusicStatus(), changed: false };
+  }
+
+  const changed =
+    !existing ||
+    existing.developerToken !== merged.developerToken ||
+    existing.userToken !== merged.userToken ||
+    existing.cookie !== merged.cookie;
+
+  if (changed) {
+    setSetting(SETTINGS.credentialsJson, JSON.stringify(merged));
+    setSetting(SETTINGS.authUpdatedAt, new Date().toISOString());
+  }
+
+  return { status: getAppleMusicStatus(), changed };
+}
+
 export function logoutAppleMusic(): AppleMusicStatus {
   deleteSettings([SETTINGS.credentialsJson, SETTINGS.authUpdatedAt]);
   return getAppleMusicStatus();
