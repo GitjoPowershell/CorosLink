@@ -383,4 +383,39 @@ try {
   await fs.promises.rm(batchTempRoot, { recursive: true, force: true });
 }
 
+// ---- Keyless routing (BRouter helpers) ----
+const brouterUrl = pathToFileURL(
+  path.join(repoRoot, "dist-electron", "routing", "brouter.js")
+);
+const {
+  brouterProfileFor,
+  haversineMeters,
+  straightLineGeometry
+} = await import(`${brouterUrl.href}?cacheBust=${Date.now()}`);
+
+// Activity → profile mapping stays stable (used to pick BRouter profiles).
+assert.equal(brouterProfileFor("hiking"), "hiking-mountain");
+assert.equal(brouterProfileFor("cycling-road"), "fastbike");
+assert.equal(brouterProfileFor("cycling-mountain"), "mtb");
+
+// Haversine sanity: ~1.11 km per 0.01° of latitude.
+const latDegreeMeters = haversineMeters(
+  { lat: 43.0, lon: -79.0 },
+  { lat: 43.01, lon: -79.0 }
+);
+assert.ok(
+  Math.abs(latDegreeMeters - 1112) < 40,
+  `expected ~1112 m, got ${latDegreeMeters}`
+);
+
+// Freehand geometry is computed locally (no network) from the raw waypoints.
+const freehand = straightLineGeometry([
+  { lat: 43.0, lon: -79.0 },
+  { lat: 43.01, lon: -79.0 },
+  { lat: 43.02, lon: -79.0 }
+]);
+assert.equal(freehand.points.length, 3);
+assert.ok(Math.abs(freehand.distanceMeters - 2 * latDegreeMeters) < 80);
+assert.equal(freehand.ascentMeters, undefined);
+
 console.log("Maps service tests passed.");

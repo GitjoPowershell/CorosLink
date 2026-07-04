@@ -61,7 +61,10 @@ import {
   listGeneratedRoutes,
   openCorosMapDownload,
   openLocationServicesSettings,
+  routeWaypoints,
+  saveDrawnRoute,
   saveRouteBuilderConfig,
+  searchRouteLocations,
   setCorosMapDownloadListener,
   setCorosMapInstallProgressListener,
   toCorosMapInstallIpcError,
@@ -72,8 +75,10 @@ import type {
   CorosMapPackage,
   DownloadJob,
   DownloadQueueItem,
+  DrawnRoutePayload,
   GenerateRouteRequest,
   RouteBuilderConfig,
+  RouteWaypointRequest,
   SpotifyConfig,
   TrainingHubActivity,
   TrainingHubActivityFileType,
@@ -793,8 +798,21 @@ function registerIpcHandlers(): void {
     geocodeRouteLocation(query)
   );
 
+  ipcMain.handle("maps:searchRouteLocations", (_event, query: string) =>
+    searchRouteLocations(query)
+  );
+
   ipcMain.handle("maps:generateRoute", (_event, request: GenerateRouteRequest) =>
     generateRoute(request)
+  );
+
+  ipcMain.handle(
+    "maps:routeWaypoints",
+    (_event, request: RouteWaypointRequest) => routeWaypoints(request)
+  );
+
+  ipcMain.handle("maps:saveDrawnRoute", (_event, payload: DrawnRoutePayload) =>
+    saveDrawnRoute(payload)
   );
 
   ipcMain.handle("maps:exportGeneratedRoute", (_event, id: string) =>
