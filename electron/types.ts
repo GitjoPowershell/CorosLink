@@ -369,8 +369,58 @@ export type RouteActivityType =
   | "cycling-road"
   | "cycling-mountain";
 
+/**
+ * Which routing/geocoding backend the Route Studio uses.
+ * - `keyless` (default): BRouter + Nominatim, no signup required.
+ * - `ors`: OpenRouteService, requires a saved API key (power users).
+ */
+export type RouteBackend = "keyless" | "ors";
+
 export interface RouteBuilderConfig {
+  /** Optional OpenRouteService key; only used when `backend` is `ors`. */
   openRouteServiceApiKey: string;
+  /** Selected routing backend. Absent is treated as `keyless`. */
+  backend?: RouteBackend;
+}
+
+/** A single map waypoint the draw tool routes through. */
+export interface RouteWaypoint {
+  lat: number;
+  lon: number;
+}
+
+/**
+ * Request for the interactive draw tool. `snap` routes each leg along real
+ * roads/trails (BRouter); otherwise legs are straight lines.
+ */
+export interface RouteWaypointRequest {
+  waypoints: RouteWaypoint[];
+  activityType: RouteActivityType;
+  snap: boolean;
+}
+
+/** Geometry + stats for a routed path, without any persistence. */
+export interface RouteGeometry {
+  points: TrainingHubTrackPoint[];
+  distanceMeters: number;
+  durationSeconds?: number;
+  ascentMeters?: number;
+  descentMeters?: number;
+}
+
+/** Payload used to persist a finished drawn route. */
+export interface DrawnRoutePayload {
+  name?: string;
+  waypoints: RouteWaypoint[];
+  points: TrainingHubTrackPoint[];
+  distanceMeters: number;
+  durationSeconds?: number;
+  ascentMeters?: number;
+  descentMeters?: number;
+  activityType: RouteActivityType;
+  /** True when the path returns to its start (a loop). */
+  closed: boolean;
+  snap: boolean;
 }
 
 export interface RouteApiKeyValidation {

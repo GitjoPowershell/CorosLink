@@ -1,0 +1,150 @@
+import {
+  Activity,
+  Clock,
+  Gauge,
+  Mountain,
+  Route as RouteIcon,
+  TrendingDown,
+  TrendingUp
+} from "lucide-react";
+import { useMemo } from "react";
+import type {
+  ActivityPaceBaselines,
+  RouteActivityType,
+  TrainingHubTrackPoint
+} from "../../../electron/types";
+import {
+  buildElevationProfile,
+  climbRatePerKm,
+  difficultyFromClimbRate,
+  effectiveRouteDuration,
+  formatDistance,
+  formatDuration,
+  formatMeters,
+  formatPaceOrSpeed,
+  isCyclingActivity
+} from "./utils";
+
+export interface RouteSummary {
+  distanceMeters: number;
+  durationSeconds?: number;
+  ascentMeters?: number;
+  descentMeters?: number;
+  activityType: RouteActivityType;
+  points: TrainingHubTrackPoint[];
+}
+
+/**
+ * Bottom stats bar: distance / time / pace / ascent / terrain plus a live
+ * elevation profile. Shared by Generate and Draw so both feel identical.
+ */
+export function RouteStatsBar({
+  summary,
+  paceBaselines,
+  busy
+}: {
+  summary: RouteSummary | null;
+  paceBaselines: ActivityPaceBaselines;
+  busy?: boolean;
+}) {
+  const profile = useMemo(
+    () => (summary ? buildElevationProfile(summary.points) : null),
+    [summary]
+  );
+
+  if (!summary) {
+    return (
+      <div className="route-statsbar is-empty">
+        <RouteIcon size={16} aria-hidden="true" />
+        <span>{busy ? "Building route…" : "No route yet — plan or draw one to see stats"}</span>
+      </div>
+    );
+  }
+
+  const cycling = isCyclingActivity(summary.activityType);
+  const baseline = paceBaselines[summary.activityType];
+  const duration = effectiveRouteDuration(summary, baseline);
+  const paceSpeed = formatPaceOrSpeed(summary, duration.seconds);
+  const climb = climbRatePerKm(summary);
+
+  return (
+    <div className="route-statsbar">
+      <div className="route-statsbar-metrics">
+        <Metric
+          icon={<RouteIcon size={15} aria-hidden="true" />}
+          value={formatDistance(summary.distanceMeters)}
+          unit="km"
+          label="Distance"
+        />
+        <Metric
+          icon={<Clock size={15} aria-hidden="true" />}
+          value={formatDuration(duration.seconds)}
+          label={duration.estimated ? "Est. time" : "Time"}
+        />
+        <Metric
+          icon={<Gauge size={15} aria-hidden="true" />}
+          value={paceSpeed ?? "—"}
+          label={cycling ? "Speed" : "Pace"}
+        />
+        <Metric
+          icon={<TrendingUp size={15} aria-hidden="true" />}
+          value={formatMeters(summary.ascentMeters)}
+          label="Ascent"
+        />
+        <Metric
+          icon={<TrendingDown size={15} aria-hidden="true" />}
+          value={formatMeters(summary.descentMeters)}
+          label="Descent"
+        />
+        <Metric
+          icon={<Mountain size={15} aria-hidden="true" />}
+          value={climb !== undefined ? difficultyFromClimbRate(climb) : "—"}
+          label="Terrain"
+        />
+      </div>
+
+      {profile ? (
+        <div className="route-statsbar-elevation">
+          <div className="route-elevation-head">
+            <Activity size={13} aria-hidden="true" />
+            <span>
+              {Math.round(profile.minEle)}–{Math.round(profile.maxEle)} m
+            </span>
+          </div>
+          <svg
+            className="route-elevation-chart"
+            viewBox="0 0 100 32"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <polygon className="route-elevation-fill" points={profile.areaPoints} />
+            <polyline className="route-elevation-line" points={profile.linePoints} />
+          </svg>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Metric({
+  icon,
+  value,
+  unit,
+  label
+}: {
+  icon: React.ReactNode;
+  value: string;
+  unit?: string;
+  label: string;
+}) {
+  return (
+    <div className="route-metric">
+      <span className="route-metric-value">
+        {icon}
+        <strong>{value}</strong>
+        {unit ? <em>{unit}</em> : null}
+      </span>
+      <span className="route-metric-label">{label}</span>
+    </div>
+  );
+}

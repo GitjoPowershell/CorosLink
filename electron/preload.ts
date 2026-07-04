@@ -11,12 +11,15 @@ import type {
   DownloadAudioResult,
   DownloadJob,
   DownloadQueueItem,
+  DrawnRoutePayload,
   GenerateRouteRequest,
   GeneratedRoute,
   LocalTrack,
   RouteApiKeyValidation,
   RouteBuilderConfig,
   RouteGeocodeResult,
+  RouteGeometry,
+  RouteWaypointRequest,
   ActivityPaceBaselines,
   RouteShareSession,
   SpotifyConfig,
@@ -361,8 +364,14 @@ const api = {
     ipcRenderer.invoke("maps:getApproximateRouteLocation"),
   geocodeRouteLocation: (query: string): Promise<RouteGeocodeResult> =>
     ipcRenderer.invoke("maps:geocodeRouteLocation", query),
+  searchRouteLocations: (query: string): Promise<RouteGeocodeResult[]> =>
+    ipcRenderer.invoke("maps:searchRouteLocations", query),
   generateRoute: (request: GenerateRouteRequest): Promise<GeneratedRoute> =>
     ipcRenderer.invoke("maps:generateRoute", request),
+  routeWaypoints: (request: RouteWaypointRequest): Promise<RouteGeometry> =>
+    ipcRenderer.invoke("maps:routeWaypoints", request),
+  saveDrawnRoute: (payload: DrawnRoutePayload): Promise<GeneratedRoute> =>
+    ipcRenderer.invoke("maps:saveDrawnRoute", payload),
   exportGeneratedRoute: (id: string): Promise<string | null> =>
     ipcRenderer.invoke("maps:exportGeneratedRoute", id),
   deleteGeneratedRoute: (id: string): Promise<boolean> =>

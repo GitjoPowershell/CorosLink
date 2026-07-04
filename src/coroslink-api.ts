@@ -10,12 +10,15 @@ import type {
   DownloadAudioResult,
   DownloadJob,
   DownloadQueueItem,
+  DrawnRoutePayload,
   GenerateRouteRequest,
   GeneratedRoute,
   LocalTrack,
   RouteApiKeyValidation,
   RouteBuilderConfig,
   RouteGeocodeResult,
+  RouteGeometry,
+  RouteWaypointRequest,
   ActivityPaceBaselines,
   RouteShareSession,
   SpotifyConfig,
@@ -215,7 +218,10 @@ export interface CorosLinkApi {
   openLocationServicesSettings: () => Promise<void>;
   getApproximateRouteLocation: () => Promise<RouteGeocodeResult>;
   geocodeRouteLocation: (query: string) => Promise<RouteGeocodeResult>;
+  searchRouteLocations: (query: string) => Promise<RouteGeocodeResult[]>;
   generateRoute: (request: GenerateRouteRequest) => Promise<GeneratedRoute>;
+  routeWaypoints: (request: RouteWaypointRequest) => Promise<RouteGeometry>;
+  saveDrawnRoute: (payload: DrawnRoutePayload) => Promise<GeneratedRoute>;
   exportGeneratedRoute: (id: string) => Promise<string | null>;
   deleteGeneratedRoute: (id: string) => Promise<boolean>;
   startRouteShare: (id: string) => Promise<RouteShareSession>;

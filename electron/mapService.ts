@@ -25,19 +25,35 @@ import type {
   CorosMapManifest,
   CorosMapPackage,
   CorosMapType,
+  DrawnRoutePayload,
   GenerateRouteRequest,
   GeneratedRoute,
   RouteActivityType,
   RouteApiKeyValidation,
+  RouteBackend,
   RouteGeocodeResult,
+  RouteGeometry,
   RouteBuilderConfig,
+  RouteWaypoint,
+  RouteWaypointRequest,
   TrainingHubTrackPoint
 } from "./types";
+import {
+  routeViaBrouter,
+  straightLineGeometry,
+  synthesizeLoop
+} from "./routing/brouter";
+import {
+  geocodeNominatim,
+  reverseGeocodeNominatim,
+  searchNominatim
+} from "./routing/nominatim";
 import { getWatchStatus } from "./watchService";
 
 const COROS_MAP_HOST = "https://map-oss-us.coros.com";
 const COROS_MAP_MANIFEST_URL = `${COROS_MAP_HOST}/regionMap/v5/regions_v5.json`;
 const ORS_API_KEY_SETTING = "maps.openRouteServiceApiKey";
+const ROUTE_BACKEND_SETTING = "maps.routeBackend";
 const ORS_BASE_URL = "https://api.openrouteservice.org";
 const MAX_FOOT_ROUTE_DISTANCE_KM = 100;
 const MAX_CYCLING_ROUTE_DISTANCE_KM = 300;
@@ -960,8 +976,10 @@ export async function installCorosMapFolder(
 }
 
 export function getRouteBuilderConfig(): RouteBuilderConfig {
+  const backend = getSetting(ROUTE_BACKEND_SETTING) === "ors" ? "ors" : "keyless";
   return {
-    openRouteServiceApiKey: getSetting(ORS_API_KEY_SETTING) ?? ""
+    openRouteServiceApiKey: getSetting(ORS_API_KEY_SETTING) ?? "",
+    backend
   };
 }
 
@@ -969,7 +987,18 @@ export function saveRouteBuilderConfig(
   config: RouteBuilderConfig
 ): RouteBuilderConfig {
   setSetting(ORS_API_KEY_SETTING, config.openRouteServiceApiKey.trim());
+  setSetting(ROUTE_BACKEND_SETTING, config.backend === "ors" ? "ors" : "keyless");
   return getRouteBuilderConfig();
+}
+
+/**
+ * Chooses the active routing backend. ORS is used only when the user opted into
+ * it AND a key is saved; otherwise routing is keyless (BRouter + Nominatim).
+ */
+function resolveRouteBackend(): RouteBackend {
+  const configured = getSetting(ROUTE_BACKEND_SETTING);
+  const hasKey = Boolean(getSetting(ORS_API_KEY_SETTING)?.trim());
+  return configured === "ors" && hasKey ? "ors" : "keyless";
 }
 
 export function listGeneratedRoutes(): GeneratedRoute[] {
@@ -1127,39 +1156,85 @@ export async function geocodeRouteLocation(
     };
   }
 
-  const apiKey = getSetting(ORS_API_KEY_SETTING)?.trim();
-  if (!apiKey) {
-    throw new Error(
-      "Save an OpenRouteService API key before finding locations on the map."
-    );
-  }
+  // Keyless geocoding via Nominatim; ORS is only used for route generation when
+  // the user has explicitly opted into it.
+  return geocodeNominatim(trimmedQuery);
+}
 
-  const result = await geocodeLocation(trimmedQuery, apiKey);
-  return {
-    label: result.label,
-    lat: result.coordinates[1],
-    lon: result.coordinates[0]
-  };
+/** Type-ahead location suggestions (keyless, Nominatim). */
+export async function searchRouteLocations(
+  query: string
+): Promise<RouteGeocodeResult[]> {
+  const trimmed = query.trim();
+  const pinned = parseRouteCoordinateInput(trimmed);
+  if (pinned) {
+    return [
+      {
+        label: pinned.label,
+        lat: pinned.coordinates[1],
+        lon: pinned.coordinates[0]
+      }
+    ];
+  }
+  return searchNominatim(trimmed);
 }
 
 export async function generateRoute(
   request: GenerateRouteRequest
 ): Promise<GeneratedRoute> {
-  const apiKey = getSetting(ORS_API_KEY_SETTING)?.trim();
-  if (!apiKey) {
-    throw new Error("Save an OpenRouteService API key before generating routes.");
+  const normalized = normalizeGenerateRouteRequest(request);
+  const route =
+    resolveRouteBackend() === "ors"
+      ? await generateRouteWithOrs(normalized)
+      : await generateRouteKeyless(normalized);
+  return persistRoute(route);
+}
+
+/** Keyless generation via Nominatim (geocode) + BRouter (routing). */
+async function generateRouteKeyless(
+  request: GenerateRouteRequest
+): Promise<GeneratedRoute> {
+  const start = await resolveLocation(request.startLocation);
+
+  if (request.mode === "loop") {
+    const geometry = await synthesizeLoop(
+      { lat: start.lat, lon: start.lon },
+      request.distanceKm,
+      request.activityType,
+      request.variationSeed ?? 0
+    );
+    return buildGeneratedRoute(request, geometry, start.label);
   }
 
-  const normalized = normalizeGenerateRouteRequest(request);
-  const start = await geocodeLocation(normalized.startLocation, apiKey);
+  const destination = await resolveLocation(request.destinationLocation ?? "");
+  const geometry = await routeViaBrouter(
+    [
+      { lat: start.lat, lon: start.lon },
+      { lat: destination.lat, lon: destination.lon }
+    ],
+    request.activityType
+  );
+  return buildGeneratedRoute(request, geometry, start.label, destination.label);
+}
+
+/** Legacy OpenRouteService path, used only when the user opts into ORS. */
+async function generateRouteWithOrs(
+  request: GenerateRouteRequest
+): Promise<GeneratedRoute> {
+  const apiKey = getSetting(ORS_API_KEY_SETTING)?.trim();
+  if (!apiKey) {
+    throw new Error("Save an OpenRouteService API key or switch to keyless routing.");
+  }
+
+  const start = await geocodeLocation(request.startLocation, apiKey);
   const destination =
-    normalized.mode === "point-to-point"
-      ? await geocodeLocation(normalized.destinationLocation ?? "", apiKey)
+    request.mode === "point-to-point"
+      ? await geocodeLocation(request.destinationLocation ?? "", apiKey)
       : undefined;
 
-  const profile = ORS_PROFILE_BY_ACTIVITY[normalized.activityType];
+  const profile = ORS_PROFILE_BY_ACTIVITY[request.activityType];
   const body = buildOrsDirectionsBody(
-    normalized,
+    request,
     start.coordinates,
     destination?.coordinates
   );
@@ -1179,16 +1254,143 @@ export async function generateRoute(
     throw new Error(describeOrsError(response.status, response.statusText, details));
   }
 
-  const route = routeFromOrsResponse(
+  return routeFromOrsResponse(
     (await response.json()) as OrsDirectionsResponse,
-    normalized,
+    request,
     start.label,
     destination?.label
   );
+}
+
+/**
+ * Routes through arbitrary waypoints for the interactive draw tool. Returns
+ * geometry + live stats without persisting anything; snapping follows real
+ * paths (BRouter) while freehand draws straight legs.
+ */
+export async function routeWaypoints(
+  request: RouteWaypointRequest
+): Promise<RouteGeometry> {
+  const waypoints = request.waypoints.filter(
+    (point) => Number.isFinite(point.lat) && Number.isFinite(point.lon)
+  );
+  if (waypoints.length < 2) {
+    throw new Error("Add at least two points to build a route.");
+  }
+  if (!request.snap) {
+    return straightLineGeometry(waypoints);
+  }
+  return routeViaBrouter(waypoints, request.activityType);
+}
+
+/** Persists a finished drawn route (geometry + stats) as a saved route. */
+export async function saveDrawnRoute(
+  payload: DrawnRoutePayload
+): Promise<GeneratedRoute> {
+  const points = payload.points.filter(
+    (point) => point.lat !== undefined && point.lon !== undefined
+  );
+  if (points.length < 2) {
+    throw new Error("Draw at least two connected points before saving.");
+  }
+
+  const startLabel = await labelForWaypoint(payload.waypoints[0]);
+  const endLabel = payload.closed
+    ? undefined
+    : await labelForWaypoint(payload.waypoints[payload.waypoints.length - 1]);
+  const distanceKm = payload.distanceMeters / 1000;
+  const activityLabel =
+    ROUTE_ACTIVITY_LABELS[payload.activityType] ?? payload.activityType;
+  const name =
+    payload.name?.trim() ||
+    `${distanceKm.toFixed(1)} km custom ${activityLabel.toLowerCase()}`;
+
+  const route: GeneratedRoute = {
+    id: crypto.randomUUID(),
+    name,
+    createdAt: new Date().toISOString(),
+    startLocation: startLabel,
+    destinationLocation: endLabel,
+    distanceMeters: Math.round(payload.distanceMeters),
+    durationSeconds: payload.durationSeconds,
+    ascentMeters: payload.ascentMeters,
+    descentMeters: payload.descentMeters,
+    mode: payload.closed ? "loop" : "point-to-point",
+    activityType: payload.activityType,
+    surfacePreference: "road",
+    avoidHighways: false,
+    elevationPreference: "any",
+    points,
+    bounds: boundsForPoints(points)
+  };
+  return persistRoute(route);
+}
+
+/** Builds GPX, writes it to disk, and stores the route in the database. */
+async function persistRoute(route: GeneratedRoute): Promise<GeneratedRoute> {
   const gpx = buildRouteGpx(route);
   const gpxPath = await writeRouteGpx(route.id, route.name, gpx);
-  const saved = addGeneratedRoute({ ...route, gpxPath });
-  return saved;
+  return addGeneratedRoute({ ...route, gpxPath });
+}
+
+/** Resolves free text or a coordinate pin to a labelled point (keyless). */
+async function resolveLocation(
+  query: string
+): Promise<{ lat: number; lon: number; label: string }> {
+  const pinned = parseRouteCoordinateInput(query);
+  if (pinned) {
+    return {
+      lat: pinned.coordinates[1],
+      lon: pinned.coordinates[0],
+      label: pinned.label
+    };
+  }
+  const result = await geocodeNominatim(query);
+  return { lat: result.lat, lon: result.lon, label: result.label };
+}
+
+/** Best-effort reverse geocode for naming a drawn route; never throws. */
+async function labelForWaypoint(waypoint?: RouteWaypoint): Promise<string> {
+  if (!waypoint) {
+    return "Custom route";
+  }
+  try {
+    const result = await reverseGeocodeNominatim(waypoint.lat, waypoint.lon);
+    return result.label;
+  } catch {
+    return `${waypoint.lat.toFixed(4)}, ${waypoint.lon.toFixed(4)}`;
+  }
+}
+
+/** Assembles a GeneratedRoute from routed geometry + request metadata. */
+function buildGeneratedRoute(
+  request: GenerateRouteRequest,
+  geometry: RouteGeometry,
+  startLabel: string,
+  destinationLabel?: string
+): GeneratedRoute {
+  const name =
+    request.mode === "loop"
+      ? `${request.distanceKm} km loop from ${startLabel}`
+      : `${startLabel} to ${destinationLabel ?? request.destinationLocation}`;
+
+  return {
+    id: crypto.randomUUID(),
+    name,
+    createdAt: new Date().toISOString(),
+    startLocation: startLabel,
+    destinationLocation: destinationLabel,
+    distanceMeters: geometry.distanceMeters,
+    durationSeconds: geometry.durationSeconds,
+    ascentMeters: geometry.ascentMeters,
+    descentMeters: geometry.descentMeters,
+    mode: request.mode,
+    activityType: request.activityType,
+    surfacePreference: request.surfacePreference,
+    avoidHighways: request.avoidHighways,
+    elevationPreference: request.elevationPreference,
+    points: geometry.points,
+    bounds: boundsForPoints(geometry.points)
+  };
 }
 
 export async function exportGeneratedRoute(id: string): Promise<string | null> {
