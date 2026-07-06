@@ -154,6 +154,7 @@ Browse, cache, and install COROS map data to your watch over USB.
 Generate GPX routes and send them to your phone for import into the COROS app.
 
 - **Generate loop or point-to-point routes** with an OpenRouteService API key
+- **Import GPX files** from Strava, Komoot, or anywhere else — loaded as saved routes with distance, elevation, and loop detection
 - **Sport presets** — running, walking, hiking, road cycling, and mountain biking — plus elevation preference
 - **Interactive map preview** with start pin, fit route, and layer themes
 - **Route stats** — distance, estimated time and pace, ascent/descent, and elevation profile
@@ -179,6 +180,7 @@ Log in with your COROS account to view training data, fitness scores, and race p
 - **Race predictor** with estimated finish times by distance
 - **Recent activities table** with a detail panel for laps, HR, elevation, and more
 - **FIT file export** via signed download URL
+- **Bulk activity backup** — download your entire activity history (FIT, GPX, TCX, KML, or CSV) to a local folder; re-running only fetches new activities
 
 <p align="center">
   <img src="docs/screenshots/training-hub-2.png" alt="Training Hub" width="900" />

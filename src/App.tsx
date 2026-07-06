@@ -88,6 +88,7 @@ import {
   countPendingTransfers,
   isLocalTrackOnWatch,
 } from "./media/libraryUtils";
+import { trackAvatarColor, trackInitial } from "./media/trackAvatar";
 import { useTimeOfDayGreeting } from "./hooks/useTimeOfDayGreeting";
 import {
   getWatchPresentation,
@@ -1560,6 +1561,7 @@ export default function App() {
             ) : null}
             {activeView === "training" ? (
               <TrainingHubView
+                api={api}
                 status={trainingHubStatus}
                 email={trainingHubEmail}
                 password={trainingHubPassword}
@@ -5954,30 +5956,6 @@ function viewTitle(view: View): string {
   }
 
   return "Training Hub";
-}
-
-const TRACK_AVATAR_COLORS = [
-  "#2d9a74",
-  "#6366f1",
-  "#d89b22",
-  "#ec4899",
-  "#14b8a6",
-  "#f97316",
-];
-
-function trackAvatarColor(title: string): string {
-  let hash = 0;
-
-  for (const character of title) {
-    hash = (hash + character.charCodeAt(0)) % TRACK_AVATAR_COLORS.length;
-  }
-
-  return TRACK_AVATAR_COLORS[hash];
-}
-
-function trackInitial(title: string): string {
-  const trimmed = title.trim();
-  return trimmed ? trimmed[0].toUpperCase() : "?";
 }
 
 function formatBytes(bytes: number): string {

@@ -1,4 +1,5 @@
 import type {
+  ActivityBackupProgress,
   BinaryStatus,
   CachedCorosMapPackage,
   CorosMapDownloadJob,
@@ -14,6 +15,7 @@ import type {
   GenerateRouteRequest,
   GeneratedRoute,
   LocalTrack,
+  RouteActivityType,
   RouteApiKeyValidation,
   RouteBuilderConfig,
   RouteGeocodeResult,
@@ -174,6 +176,16 @@ export interface CorosLinkApi {
   exportLatestTrainingHubActivityFile: (
     fileType?: TrainingHubActivityFileType
   ) => Promise<TrainingHubExportResult>;
+  chooseActivityBackupFolder: () => Promise<string | null>;
+  startActivityBackup: (
+    folder: string,
+    fileType?: TrainingHubActivityFileType
+  ) => Promise<ActivityBackupProgress>;
+  cancelActivityBackup: () => Promise<ActivityBackupProgress | null>;
+  getActivityBackupProgress: () => Promise<ActivityBackupProgress | null>;
+  onActivityBackupProgress: (
+    callback: (progress: ActivityBackupProgress) => void
+  ) => () => void;
   getTrainingAnalytics: () => Promise<TrainingHubAnalytics>;
   getRacePredictor: () => Promise<TrainingHubRacePredictor>;
   getTrainingDashboard: () => Promise<TrainingHubDashboard>;
@@ -224,6 +236,9 @@ export interface CorosLinkApi {
   generateRoute: (request: GenerateRouteRequest) => Promise<GeneratedRoute>;
   routeWaypoints: (request: RouteWaypointRequest) => Promise<RouteGeometry>;
   saveDrawnRoute: (payload: DrawnRoutePayload) => Promise<GeneratedRoute>;
+  importRouteGpx: (
+    activityType?: RouteActivityType
+  ) => Promise<GeneratedRoute | null>;
   exportGeneratedRoute: (id: string) => Promise<string | null>;
   deleteGeneratedRoute: (id: string) => Promise<boolean>;
   startRouteShare: (id: string) => Promise<RouteShareSession>;

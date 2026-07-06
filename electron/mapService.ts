@@ -39,6 +39,7 @@ import type {
   TrainingHubTrackPoint
 } from "./types";
 import {
+  haversineMeters,
   routeViaBrouter,
   straightLineGeometry,
   synthesizeLoop
@@ -1415,6 +1416,181 @@ export async function exportGeneratedRoute(id: string): Promise<string | null> {
 
   await fs.promises.copyFile(route.gpxPath, result.filePath);
   return result.filePath;
+}
+
+// Imported GPX tracks can carry tens of thousands of recorded points; cap what
+// we store so previews and re-exports stay fast while tracing the same path.
+const GPX_IMPORT_MAX_POINTS = 4000;
+// First and last points within this distance mark an imported route as a loop.
+const GPX_LOOP_CLOSE_METERS = 100;
+
+export interface ParsedGpxRoute {
+  name?: string;
+  points: TrainingHubTrackPoint[];
+}
+
+function unescapeXml(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * Minimal GPX reader for route import. Prefers `<trkpt>` (recorded tracks),
+ * falls back to `<rtept>` (planned courses). Deliberately regex-based: GPX is
+ * flat enough that a full XML parser dependency isn't warranted here.
+ */
+export function parseGpxRoute(content: string): ParsedGpxRoute {
+  const collect = (tag: "trkpt" | "rtept"): TrainingHubTrackPoint[] => {
+    const points: TrainingHubTrackPoint[] = [];
+    const pattern = new RegExp(
+      `<${tag}\\b([^>]*?)(?:/>|>([\\s\\S]*?)</${tag}>)`,
+      "g"
+    );
+    for (const match of content.matchAll(pattern)) {
+      const attrs = match[1] ?? "";
+      const lat = Number(/(?:^|\s)lat\s*=\s*["']([^"']+)["']/.exec(attrs)?.[1]);
+      const lon = Number(/(?:^|\s)lon\s*=\s*["']([^"']+)["']/.exec(attrs)?.[1]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        continue;
+      }
+      const elevation = Number(
+        /<ele>\s*(-?[\d.]+)\s*<\/ele>/.exec(match[2] ?? "")?.[1]
+      );
+      points.push({
+        lat,
+        lon,
+        ...(Number.isFinite(elevation) ? { elevation } : {})
+      });
+    }
+    return points;
+  };
+
+  const trackPoints = collect("trkpt");
+  const points = trackPoints.length >= 2 ? trackPoints : collect("rtept");
+
+  const rawName = /<name>([\s\S]*?)<\/name>/.exec(content)?.[1]?.trim();
+  const name = rawName
+    ?.replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/, "$1")
+    .trim();
+
+  return { name: name ? unescapeXml(name) : undefined, points };
+}
+
+/**
+ * Turns raw GPX text into an unsaved GeneratedRoute: parses points, derives
+ * distance/ascent/descent and loop detection. Exported for tests;
+ * importRouteFromGpx adds the file dialog, geocoded labels, and persistence.
+ */
+export function buildRouteFromGpxContent(
+  content: string,
+  fallbackName: string,
+  activityType: RouteActivityType = "running"
+): GeneratedRoute {
+  const parsed = parseGpxRoute(content);
+  const points = parsed.points.filter(
+    (point) => point.lat !== undefined && point.lon !== undefined
+  );
+  if (points.length < 2) {
+    throw new Error(
+      "No track or route points were found in this GPX file."
+    );
+  }
+
+  let distanceMeters = 0;
+  let ascentMeters = 0;
+  let descentMeters = 0;
+  let hasElevation = false;
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1]!;
+    const current = points[index]!;
+    distanceMeters += haversineMeters(
+      { lat: previous.lat!, lon: previous.lon! },
+      { lat: current.lat!, lon: current.lon! }
+    );
+    if (previous.elevation !== undefined && current.elevation !== undefined) {
+      hasElevation = true;
+      const delta = current.elevation - previous.elevation;
+      if (delta > 0) {
+        ascentMeters += delta;
+      } else {
+        descentMeters -= delta;
+      }
+    }
+  }
+
+  const first = points[0]!;
+  const last = points[points.length - 1]!;
+  const closed =
+    haversineMeters(
+      { lat: first.lat!, lon: first.lon! },
+      { lat: last.lat!, lon: last.lon! }
+    ) <= GPX_LOOP_CLOSE_METERS;
+
+  const stored = decimatePoints(points, GPX_IMPORT_MAX_POINTS);
+
+  return {
+    id: crypto.randomUUID(),
+    name: parsed.name || fallbackName,
+    createdAt: new Date().toISOString(),
+    startLocation: `${first.lat!.toFixed(4)}, ${first.lon!.toFixed(4)}`,
+    destinationLocation: closed
+      ? undefined
+      : `${last.lat!.toFixed(4)}, ${last.lon!.toFixed(4)}`,
+    distanceMeters: Math.round(distanceMeters),
+    ascentMeters: hasElevation ? Math.round(ascentMeters) : undefined,
+    descentMeters: hasElevation ? Math.round(descentMeters) : undefined,
+    mode: closed ? "loop" : "point-to-point",
+    activityType,
+    surfacePreference: "road",
+    avoidHighways: false,
+    elevationPreference: "any",
+    points: stored,
+    bounds: boundsForPoints(stored)
+  };
+}
+
+/**
+ * Asks the user for a GPX file, converts it into a saved route (with a
+ * CorosLink-format GPX on disk so export/share work), and returns it.
+ * Resolves null when the dialog is cancelled.
+ */
+export async function importRouteFromGpx(
+  activityType: RouteActivityType = "running"
+): Promise<GeneratedRoute | null> {
+  const result = await dialog.showOpenDialog({
+    title: "Import GPX route",
+    filters: [{ name: "GPX", extensions: ["gpx"] }],
+    properties: ["openFile"]
+  });
+  if (result.canceled || !result.filePaths[0]) {
+    return null;
+  }
+
+  const filePath = result.filePaths[0];
+  const content = await fs.promises.readFile(filePath, "utf8");
+  const fallbackName = path.basename(filePath, path.extname(filePath));
+  const route = buildRouteFromGpxContent(content, fallbackName, activityType);
+
+  // Best-effort readable labels; coordinates remain as fallback.
+  const startLabel = await labelForWaypoint({
+    lat: route.points[0]!.lat!,
+    lon: route.points[0]!.lon!
+  });
+  const lastPoint = route.points[route.points.length - 1]!;
+  const endLabel =
+    route.mode === "loop"
+      ? undefined
+      : await labelForWaypoint({ lat: lastPoint.lat!, lon: lastPoint.lon! });
+
+  return persistRoute({
+    ...route,
+    startLocation: startLabel,
+    destinationLocation: endLabel
+  });
 }
 
 export function deleteGeneratedRoute(id: string): boolean {

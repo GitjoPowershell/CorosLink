@@ -650,6 +650,31 @@ export interface TrainingHubExportResult {
   formatLabel?: string;
 }
 
+export type ActivityBackupState =
+  | "listing"
+  | "downloading"
+  | "done"
+  | "cancelled"
+  | "error";
+
+/** Live progress for a bulk activity backup run. */
+export interface ActivityBackupProgress {
+  state: ActivityBackupState;
+  folder: string;
+  fileType: TrainingHubActivityFileType;
+  formatLabel: string;
+  /** Activities discovered on the COROS account (0 while listing). */
+  total: number;
+  /** Files downloaded during this run. */
+  completed: number;
+  /** Activities skipped because the file already exists in the folder. */
+  skipped: number;
+  failed: number;
+  /** Name of the activity currently downloading. */
+  currentName?: string;
+  error?: string;
+}
+
 export interface TrainingHubActivity {
   activityId: string;
   name?: string;

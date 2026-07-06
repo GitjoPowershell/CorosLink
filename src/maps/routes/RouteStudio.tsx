@@ -1,10 +1,12 @@
 import {
   ChevronDown,
   ChevronUp,
+  FileUp,
   FolderOpen,
   KeyRound,
   Loader2,
   PenLine,
+  Shapes,
   Sparkles,
   Telescope,
   X
@@ -34,7 +36,10 @@ import {
   MapLayerControl,
   type ResolvedPoint
 } from "./panels";
+import { SketchPanel } from "./SketchPanel";
+import { SKETCH_TEMPLATES } from "./sketchShapes";
 import { useRouteDraw } from "./useRouteDraw";
+import { useRouteSketch } from "./useRouteSketch";
 import { surfaceForActivity, toErrorMessage } from "./utils";
 
 const MODE_TABS: Array<{
@@ -44,6 +49,7 @@ const MODE_TABS: Array<{
 }> = [
   { id: "generate", label: "Generate", icon: Sparkles },
   { id: "draw", label: "Draw", icon: PenLine },
+  { id: "sketch", label: "Sketch", icon: Shapes },
   { id: "explore", label: "Explore", icon: Telescope }
 ];
 
@@ -80,6 +86,7 @@ export function RouteStudio({
   const [activeSavedId, setActiveSavedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [savingDraw, setSavingDraw] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [shareSession, setShareSession] = useState<RouteShareSession | null>(
     null
@@ -92,6 +99,8 @@ export function RouteStudio({
   const [overlays, setOverlays] = useState<RouteOverlayId[]>([]);
 
   const draw = useRouteDraw(api, activityType);
+  const sketch = useRouteSketch(api, activityType);
+  const [savingSketch, setSavingSketch] = useState(false);
 
   useEffect(() => {
     void api
@@ -123,6 +132,12 @@ export function RouteStudio({
         draw.addPoint(point);
         return;
       }
+      if (mode === "sketch") {
+        if (sketch.tool !== "freehand") {
+          sketch.setCenter(point);
+        }
+        return;
+      }
       if (pinTarget) {
         const label = `Pinned ${point.lat.toFixed(4)}, ${point.lon.toFixed(4)}`;
         const resolved: ResolvedPoint = {
@@ -138,7 +153,7 @@ export function RouteStudio({
         setPinTarget(null);
       }
     },
-    [mode, pinTarget, draw]
+    [mode, pinTarget, draw, sketch]
   );
 
   const handleUseCurrent = useCallback(() => {
@@ -229,6 +244,72 @@ export function RouteStudio({
     }
   }
 
+  async function handleSaveSketch() {
+    if (!sketch.geometry || sketch.geometry.points.length < 2) {
+      return;
+    }
+    setSavingSketch(true);
+    onError(null);
+    onMessage(null);
+    try {
+      const template = SKETCH_TEMPLATES.find(
+        (entry) => entry.id === sketch.templateId
+      );
+      const name =
+        sketch.tool === "template" && template
+          ? `${template.label} sketch`
+          : sketch.tool === "text" && sketch.text.trim()
+            ? `“${sketch.text.trim().toUpperCase()}” sketch`
+            : "Freehand sketch";
+      const payload: DrawnRoutePayload = {
+        name,
+        waypoints: sketch.waypoints,
+        points: sketch.geometry.points,
+        distanceMeters: sketch.geometry.distanceMeters,
+        durationSeconds: sketch.geometry.durationSeconds,
+        ascentMeters: sketch.geometry.ascentMeters,
+        descentMeters: sketch.geometry.descentMeters,
+        activityType,
+        closed: sketch.closed,
+        snap: true
+      };
+      const route = await api.saveDrawnRoute(payload);
+      setRoutes(await api.listGeneratedRoutes());
+      setPreviewRoute(route);
+      setActiveSavedId(route.id);
+      sketch.clear();
+      setMode("generate");
+      setFitRequestId((id) => id + 1);
+      onMessage("Sketch route saved.");
+    } catch (caught) {
+      onError(toErrorMessage(caught));
+    } finally {
+      setSavingSketch(false);
+    }
+  }
+
+  async function handleImportGpx() {
+    setImporting(true);
+    onError(null);
+    onMessage(null);
+    try {
+      const route = await api.importRouteGpx(activityType);
+      if (!route) {
+        return;
+      }
+      setRoutes(await api.listGeneratedRoutes());
+      setPreviewRoute(route);
+      setActiveSavedId(route.id);
+      setMode("generate");
+      setFitRequestId((id) => id + 1);
+      onMessage(`Imported "${route.name}".`);
+    } catch (caught) {
+      onError(toErrorMessage(caught));
+    } finally {
+      setImporting(false);
+    }
+  }
+
   function handleSelectSaved(route: GeneratedRoute) {
     setPreviewRoute(route);
     setActiveSavedId(route.id);
@@ -284,17 +365,18 @@ export function RouteStudio({
   }
 
   const summary = useMemo<RouteSummary | null>(() => {
-    if (mode === "draw") {
-      if (!draw.geometry) {
+    if (mode === "draw" || mode === "sketch") {
+      const geometry = mode === "draw" ? draw.geometry : sketch.geometry;
+      if (!geometry) {
         return null;
       }
       return {
-        distanceMeters: draw.geometry.distanceMeters,
-        durationSeconds: draw.geometry.durationSeconds,
-        ascentMeters: draw.geometry.ascentMeters,
-        descentMeters: draw.geometry.descentMeters,
+        distanceMeters: geometry.distanceMeters,
+        durationSeconds: geometry.durationSeconds,
+        ascentMeters: geometry.ascentMeters,
+        descentMeters: geometry.descentMeters,
         activityType,
-        points: draw.geometry.points
+        points: geometry.points
       };
     }
     if (!previewRoute) {
@@ -308,7 +390,7 @@ export function RouteStudio({
       activityType: previewRoute.activityType,
       points: previewRoute.points
     };
-  }, [mode, draw.geometry, previewRoute, activityType]);
+  }, [mode, draw.geometry, sketch.geometry, previewRoute, activityType]);
 
   const showStartPin = mode === "generate" && !previewRoute && Boolean(start);
   const showEndPin =
@@ -323,17 +405,24 @@ export function RouteStudio({
         mode={mode}
         baseLayer={baseLayer}
         overlays={overlays}
-        route={mode === "draw" ? null : previewRoute}
-        drawGeometry={draw.geometry}
-        waypoints={draw.waypoints}
+        route={mode === "draw" || mode === "sketch" ? null : previewRoute}
+        drawGeometry={mode === "sketch" ? sketch.geometry : draw.geometry}
+        waypoints={mode === "sketch" ? sketch.waypoints : draw.waypoints}
         startPin={showStartPin ? start : null}
         destinationPin={showEndPin ? destination : null}
         currentLocation={mode === "generate" ? currentLocation : null}
         pinTarget={mode === "generate" ? pinTarget : null}
         fitRequestId={fitRequestId}
         onMapClick={handleMapClick}
-        onWaypointMove={draw.movePoint}
-        onWaypointRemove={draw.removePoint}
+        onWaypointMove={mode === "sketch" ? sketch.moveWaypoint : draw.movePoint}
+        onWaypointRemove={
+          mode === "sketch" ? sketch.removeWaypoint : draw.removePoint
+        }
+        sketchTool={mode === "sketch" ? sketch.tool : null}
+        sketchGhost={mode === "sketch" ? sketch.ghost : []}
+        sketchCenter={mode === "sketch" ? sketch.center : null}
+        onSketchStroke={sketch.addStroke}
+        onSketchCenterMove={sketch.setCenter}
       />
 
       <nav className="route-mode-tabs" aria-label="Route tools">
@@ -353,15 +442,31 @@ export function RouteStudio({
         })}
       </nav>
 
-      <button
-        type="button"
-        className="route-saved-toggle"
-        onClick={() => setDrawerOpen(true)}
-      >
-        <FolderOpen size={16} aria-hidden="true" />
-        Saved
-        {routes.length > 0 ? <span className="badge">{routes.length}</span> : null}
-      </button>
+      <div className="route-top-actions">
+        <button
+          type="button"
+          className="route-saved-toggle route-import-toggle"
+          onClick={() => void handleImportGpx()}
+          disabled={importing}
+          title="Import a GPX file as a route"
+        >
+          {importing ? (
+            <Loader2 size={16} className="spin" aria-hidden="true" />
+          ) : (
+            <FileUp size={16} aria-hidden="true" />
+          )}
+          Import GPX
+        </button>
+        <button
+          type="button"
+          className="route-saved-toggle"
+          onClick={() => setDrawerOpen(true)}
+        >
+          <FolderOpen size={16} aria-hidden="true" />
+          Saved
+          {routes.length > 0 ? <span className="badge">{routes.length}</span> : null}
+        </button>
+      </div>
 
       <section className="route-panel">
         <header className="route-panel-head">
@@ -370,14 +475,18 @@ export function RouteStudio({
               ? "Generate a route"
               : mode === "draw"
                 ? "Draw your route"
-                : "Explore routes"}
+                : mode === "sketch"
+                  ? "Sketch GPS art"
+                  : "Explore routes"}
           </h2>
           <p>
             {mode === "generate"
               ? "Pick a spot and let CorosLink build it — no account, no API key."
               : mode === "draw"
                 ? "Craft a custom path point by point."
-                : "Browse real-world marked trails and cycle networks."}
+                : mode === "sketch"
+                  ? "Draw a shape, place a template, or write a word — then snap it to real streets."
+                  : "Browse real-world marked trails and cycle networks."}
           </p>
         </header>
 
@@ -417,6 +526,15 @@ export function RouteStudio({
             saving={savingDraw}
             canSave={draw.hasRoute}
           />
+        ) : mode === "sketch" ? (
+          <SketchPanel
+            sketch={sketch}
+            activityType={activityType}
+            onActivityChange={setActivityType}
+            onSave={() => void handleSaveSketch()}
+            saving={savingSketch}
+            canSave={sketch.hasRoute}
+          />
         ) : (
           <ExplorePanel
             overlays={overlays}
@@ -437,7 +555,13 @@ export function RouteStudio({
         <RouteStatsBar
           summary={summary}
           paceBaselines={paceBaselines}
-          busy={mode === "draw" ? draw.routing : generating}
+          busy={
+            mode === "draw"
+              ? draw.routing
+              : mode === "sketch"
+                ? sketch.routing
+                : generating
+          }
         />
       </div>
 

@@ -13,7 +13,8 @@ import {
   type RouteOverlayId
 } from "./constants";
 
-export type RouteStudioMode = "generate" | "draw" | "explore";
+export type RouteStudioMode = "generate" | "draw" | "explore" | "sketch";
+export type SketchCanvasTool = "freehand" | "template" | "text";
 
 interface RouteMapCanvasProps {
   mode: RouteStudioMode;
@@ -21,9 +22,9 @@ interface RouteMapCanvasProps {
   overlays: RouteOverlayId[];
   /** Preview route shown in Generate / Explore (and when reviewing saved). */
   route: GeneratedRoute | null;
-  /** Live drawn geometry (Draw mode). */
+  /** Live drawn geometry (Draw / Sketch modes). */
   drawGeometry: RouteGeometry | null;
-  /** Draggable draw waypoints (Draw mode). */
+  /** Draggable draw waypoints (Draw / Sketch modes). */
   waypoints: RouteWaypoint[];
   startPin: RouteWaypoint | null;
   destinationPin: RouteWaypoint | null;
@@ -34,6 +35,14 @@ interface RouteMapCanvasProps {
   onMapClick: (point: RouteWaypoint) => void;
   onWaypointMove: (index: number, point: RouteWaypoint) => void;
   onWaypointRemove: (index: number) => void;
+  /** Active Sketch-mode tool; null outside Sketch mode. */
+  sketchTool?: SketchCanvasTool | null;
+  /** The original sketch shown as a dashed guide over the snapped route. */
+  sketchGhost?: RouteWaypoint[];
+  /** Draggable anchor for template/text placement. */
+  sketchCenter?: RouteWaypoint | null;
+  onSketchStroke?: (points: RouteWaypoint[]) => void;
+  onSketchCenterMove?: (point: RouteWaypoint) => void;
 }
 
 const START_COLOR = "#4da3ff";
@@ -44,6 +53,10 @@ const END_COLOR = "#d89b22";
 const ROUTE_COLOR = "#ff3b3b";
 const ROUTE_COLOR_DARK = "#2fbe91";
 const ROUTE_CASING = "#ffffff";
+// Dashed sky-blue guide so the original sketch reads apart from the route.
+const SKETCH_GHOST_COLOR = "#7dd3fc";
+/** Ignore mousemove samples closer than this (px) to bound stroke size. */
+const SKETCH_SAMPLE_MIN_PX = 3;
 
 export function RouteMapCanvas({
   mode,
@@ -59,7 +72,12 @@ export function RouteMapCanvas({
   fitRequestId,
   onMapClick,
   onWaypointMove,
-  onWaypointRemove
+  onWaypointRemove,
+  sketchTool = null,
+  sketchGhost = [],
+  sketchCenter = null,
+  onSketchStroke,
+  onSketchCenterMove
 }: RouteMapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -67,6 +85,7 @@ export function RouteMapCanvas({
   const overlayLayersRef = useRef<Map<RouteOverlayId, L.TileLayer>>(new Map());
   const routeLayerRef = useRef<L.LayerGroup | null>(null);
   const waypointLayerRef = useRef<L.LayerGroup | null>(null);
+  const sketchLayerRef = useRef<L.LayerGroup | null>(null);
   const lastFitRef = useRef(fitRequestId);
   const fitSignatureRef = useRef<string>("");
 
@@ -74,12 +93,22 @@ export function RouteMapCanvas({
   const clickRef = useRef(onMapClick);
   const moveRef = useRef(onWaypointMove);
   const removeRef = useRef(onWaypointRemove);
+  const strokeRef = useRef(onSketchStroke);
+  const centerMoveRef = useRef(onSketchCenterMove);
   const interactiveRef = useRef(false);
+  const sketchToolRef = useRef<SketchCanvasTool | null>(null);
   clickRef.current = onMapClick;
   moveRef.current = onWaypointMove;
   removeRef.current = onWaypointRemove;
-  // A click adds/moves a point in Draw mode, or drops a pin in Generate mode.
-  interactiveRef.current = mode === "draw" || pinTarget !== null;
+  strokeRef.current = onSketchStroke;
+  centerMoveRef.current = onSketchCenterMove;
+  // A click adds/moves a point in Draw mode, drops a pin in Generate mode, or
+  // places the shape anchor in Sketch mode (template/text tools).
+  interactiveRef.current =
+    mode === "draw" ||
+    pinTarget !== null ||
+    (mode === "sketch" && sketchTool !== "freehand");
+  sketchToolRef.current = mode === "sketch" ? sketchTool : null;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -96,6 +125,7 @@ export function RouteMapCanvas({
     map.setView([39.5, -98.35], 4);
     mapRef.current = map;
     routeLayerRef.current = L.layerGroup().addTo(map);
+    sketchLayerRef.current = L.layerGroup().addTo(map);
     waypointLayerRef.current = L.layerGroup().addTo(map);
 
     map.on("click", (event: L.LeafletMouseEvent) => {
@@ -103,6 +133,56 @@ export function RouteMapCanvas({
         return;
       }
       clickRef.current({ lat: event.latlng.lat, lon: event.latlng.lng });
+    });
+
+    // Freehand sketch capture: with map dragging off, a drag becomes a stroke.
+    let sketching = false;
+    let strokeSamples: RouteWaypoint[] = [];
+    let lastSamplePx: L.Point | null = null;
+    let strokePreview: L.Polyline | null = null;
+
+    map.on("mousedown", (event: L.LeafletMouseEvent) => {
+      if (sketchToolRef.current !== "freehand") {
+        return;
+      }
+      // Defensive: a waypoint drag's mouseup re-enables map dragging.
+      map.dragging.disable();
+      sketching = true;
+      strokeSamples = [{ lat: event.latlng.lat, lon: event.latlng.lng }];
+      lastSamplePx = map.latLngToContainerPoint(event.latlng);
+      strokePreview = L.polyline([event.latlng], {
+        color: SKETCH_GHOST_COLOR,
+        weight: 3,
+        opacity: 0.9,
+        dashArray: "6 8",
+        interactive: false
+      }).addTo(map);
+    });
+
+    map.on("mousemove", (event: L.LeafletMouseEvent) => {
+      if (!sketching) {
+        return;
+      }
+      const px = map.latLngToContainerPoint(event.latlng);
+      if (lastSamplePx && px.distanceTo(lastSamplePx) < SKETCH_SAMPLE_MIN_PX) {
+        return;
+      }
+      lastSamplePx = px;
+      strokeSamples.push({ lat: event.latlng.lat, lon: event.latlng.lng });
+      strokePreview?.addLatLng(event.latlng);
+    });
+
+    map.on("mouseup", () => {
+      if (!sketching) {
+        return;
+      }
+      sketching = false;
+      strokePreview?.remove();
+      strokePreview = null;
+      if (strokeSamples.length >= 2) {
+        strokeRef.current?.(strokeSamples);
+      }
+      strokeSamples = [];
     });
 
     const resizeObserver = new ResizeObserver(() => map.invalidateSize());
@@ -114,10 +194,64 @@ export function RouteMapCanvas({
       mapRef.current = null;
       routeLayerRef.current = null;
       waypointLayerRef.current = null;
+      sketchLayerRef.current = null;
       baseLayerRef.current = null;
       overlayLayersRef.current.clear();
     };
   }, []);
+
+  // Freehand strokes need the pan gesture; give it back on tool/mode change.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+    if (mode === "sketch" && sketchTool === "freehand") {
+      map.dragging.disable();
+    } else {
+      map.dragging.enable();
+    }
+  }, [mode, sketchTool]);
+
+  // Dashed ghost of the original sketch + draggable template/text anchor.
+  useEffect(() => {
+    const layer = sketchLayerRef.current;
+    if (!layer) {
+      return;
+    }
+    layer.clearLayers();
+    if (mode !== "sketch") {
+      return;
+    }
+    if (sketchGhost.length >= 2) {
+      L.polyline(
+        sketchGhost.map((point) => [point.lat, point.lon] as [number, number]),
+        {
+          color: SKETCH_GHOST_COLOR,
+          weight: 3,
+          opacity: 0.8,
+          dashArray: "6 8",
+          lineCap: "round",
+          interactive: false
+        }
+      ).addTo(layer);
+    }
+    if ((sketchTool === "template" || sketchTool === "text") && sketchCenter) {
+      const handle = L.circleMarker([sketchCenter.lat, sketchCenter.lon], {
+        radius: 9,
+        color: "#05080b",
+        fillColor: SKETCH_GHOST_COLOR,
+        fillOpacity: 0.95,
+        weight: 2,
+        bubblingMouseEvents: false
+      });
+      handle.bindTooltip("Drag to move the shape", { direction: "top" });
+      makeDraggable(handle, mapRef.current, (lat, lon) =>
+        centerMoveRef.current?.({ lat, lon })
+      );
+      handle.addTo(layer);
+    }
+  }, [mode, sketchTool, sketchGhost, sketchCenter]);
 
   // Swap the base tile layer in place.
   useEffect(() => {
@@ -177,7 +311,8 @@ export function RouteMapCanvas({
     }
     layer.clearLayers();
 
-    const source = mode === "draw" ? drawGeometry?.points : route?.points;
+    const editing = mode === "draw" || mode === "sketch";
+    const source = editing ? drawGeometry?.points : route?.points;
     const linePoints = (source ?? [])
       .filter((point) => point.lat !== undefined && point.lon !== undefined)
       .map((point) => [point.lat!, point.lon!] as [number, number]);
@@ -230,9 +365,9 @@ export function RouteMapCanvas({
     const signature = `${mode}:${linePoints.length}:${route?.id ?? ""}`;
     const fitRequested = fitRequestId !== lastFitRef.current;
     const geometryAppeared =
-      linePoints.length >= 2 && fitSignatureRef.current === "" && mode !== "draw";
+      linePoints.length >= 2 && fitSignatureRef.current === "" && !editing;
     const routeChanged =
-      mode !== "draw" && signature !== fitSignatureRef.current && Boolean(route);
+      !editing && signature !== fitSignatureRef.current && Boolean(route);
     lastFitRef.current = fitRequestId;
     fitSignatureRef.current = linePoints.length >= 2 ? signature : "";
 
@@ -256,14 +391,14 @@ export function RouteMapCanvas({
     baseLayer
   ]);
 
-  // Draggable draw waypoints (Draw mode only).
+  // Draggable draw waypoints (Draw / Sketch modes).
   useEffect(() => {
     const layer = waypointLayerRef.current;
     if (!layer) {
       return;
     }
     layer.clearLayers();
-    if (mode !== "draw") {
+    if (mode !== "draw" && mode !== "sketch") {
       return;
     }
 
@@ -283,8 +418,11 @@ export function RouteMapCanvas({
         `Point ${index + 1} · drag to adjust, click to remove`,
         { direction: "top" }
       );
-      const dragState = makeDraggable(marker, mapRef.current, (lat, lon) =>
-        moveRef.current(index, { lat, lon })
+      const dragState = makeDraggable(
+        marker,
+        mapRef.current,
+        (lat, lon) => moveRef.current(index, { lat, lon }),
+        () => sketchToolRef.current === "freehand"
       );
       marker.on("click", (event) => {
         L.DomEvent.stop(event);
@@ -299,11 +437,17 @@ export function RouteMapCanvas({
     });
   }, [mode, waypoints]);
 
-  const interactive = mode === "draw" || pinTarget !== null;
+  const interactive =
+    mode === "draw" ||
+    pinTarget !== null ||
+    (mode === "sketch" && sketchTool !== "freehand");
+  const sketching = mode === "sketch" && sketchTool === "freehand";
   return (
     <div
       ref={containerRef}
-      className={`route-canvas${interactive ? " is-interactive" : ""}`}
+      className={`route-canvas${interactive ? " is-interactive" : ""}${
+        sketching ? " is-sketching" : ""
+      }`}
     />
   );
 }
@@ -351,7 +495,8 @@ interface DragState {
 function makeDraggable(
   marker: L.CircleMarker,
   map: L.Map | null,
-  onMove: (lat: number, lon: number) => void
+  onMove: (lat: number, lon: number) => void,
+  keepMapDraggingDisabled?: () => boolean
 ): DragState {
   const state: DragState = { justDragged: false };
   if (!map) {
@@ -379,7 +524,10 @@ function makeDraggable(
       return;
     }
     dragging = false;
-    map.dragging.enable();
+    // The freehand sketch tool owns the drag gesture; don't hand it back.
+    if (!keepMapDraggingDisabled?.()) {
+      map.dragging.enable();
+    }
     if (moved) {
       state.justDragged = true;
       onMove(event.latlng.lat, event.latlng.lng);

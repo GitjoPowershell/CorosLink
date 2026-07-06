@@ -20,6 +20,7 @@ import {
   isLocalTrackOnWatchByIndex,
   sumBytes,
 } from "./libraryUtils";
+import { trackAvatarColor, trackInitial } from "./trackAvatar";
 
 type SortDirection = "asc" | "desc";
 type LocalLibrarySortKey = "title" | "size" | "created" | "status";
@@ -396,7 +397,7 @@ export function LocalLibraryPanel({
     <section className="library-panel library-panel--local" aria-label="Local cache">
       <header className="library-panel-header">
         <div>
-          <span className="library-panel-eyebrow">CorosLink</span>
+          <p className="eyebrow">CorosLink</p>
           <h3>Local cache</h3>
         </div>
         <em>
@@ -604,7 +605,13 @@ export function LocalLibraryPanel({
                   checked={selected}
                   onChange={() => onToggleSelect(track.id)}
                 />
-                <span className="library-track-art library-track-art--local" aria-hidden="true" />
+                <div
+                  className="track-avatar"
+                  style={{ backgroundColor: trackAvatarColor(track.title) }}
+                  aria-hidden="true"
+                >
+                  {trackInitial(track.title)}
+                </div>
                 <span className="library-track-meta">
                   <strong>{track.title}</strong>
                   <small>{fileName}</small>
@@ -801,9 +808,7 @@ export function WatchLibraryPanel({
     >
       <header className="library-panel-header">
         <div>
-          <span className="library-panel-eyebrow">
-            {presentation.displayName}
-          </span>
+          <p className="eyebrow">{presentation.displayName}</p>
           <h3>On watch</h3>
         </div>
         <em>
@@ -971,7 +976,7 @@ export function WatchLibraryPanel({
                       checked={selected}
                       onChange={() => onToggleSelect(track.relativePath)}
                     />
-                    <span className="library-track-art library-track-art--watch" aria-hidden="true" />
+                    <div className="track-avatar track-avatar--watch" aria-hidden="true" />
                     <span className="library-track-meta">
                       <strong>{track.name}</strong>
                       <small>{track.relativePath}</small>

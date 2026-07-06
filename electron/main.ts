@@ -23,6 +23,12 @@ import {
   syncSpotifyPlaylist
 } from "./spotifyService";
 import {
+  cancelActivityBackup,
+  getActivityBackupProgress,
+  setActivityBackupProgressListener,
+  startActivityBackup
+} from "./activityBackupService";
+import {
   getActivityPaceBaselines,
   getDailyMetrics,
   getRacePredictor,
@@ -54,6 +60,7 @@ import {
   getCorosMapInstallProgress,
   getCorosMapManifest,
   getRouteBuilderConfig,
+  importRouteFromGpx,
   installCachedCorosMap,
   installCachedCorosMaps,
   installCorosMapFolder,
@@ -78,6 +85,7 @@ import type {
   DownloadQueueItem,
   DrawnRoutePayload,
   GenerateRouteRequest,
+  RouteActivityType,
   RouteBuilderConfig,
   RouteWaypointRequest,
   SpotifyConfig,
@@ -447,6 +455,11 @@ app.whenReady().then(() => {
       mainWindow.webContents.send("maps:installProgressUpdate", progress);
     }
   });
+  setActivityBackupProgressListener((progress) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("trainingHub:backupProgress", progress);
+    }
+  });
   createWindow();
   applyAppIcon();
 
@@ -773,6 +786,32 @@ function registerIpcHandlers(): void {
     }
   );
 
+  ipcMain.handle("trainingHub:chooseBackupFolder", async () => {
+    const options: Electron.OpenDialogOptions = {
+      title: "Choose a backup folder",
+      properties: ["openDirectory", "createDirectory"]
+    };
+    const result =
+      mainWindow && !mainWindow.isDestroyed()
+        ? await dialog.showOpenDialog(mainWindow, options)
+        : await dialog.showOpenDialog(options);
+    return result.canceled ? null : result.filePaths[0] ?? null;
+  });
+
+  ipcMain.handle(
+    "trainingHub:startActivityBackup",
+    (_event, folder: string, fileType: TrainingHubActivityFileType = 4) =>
+      startActivityBackup(folder, fileType)
+  );
+
+  ipcMain.handle("trainingHub:cancelActivityBackup", () =>
+    cancelActivityBackup()
+  );
+
+  ipcMain.handle("trainingHub:getActivityBackupProgress", () =>
+    getActivityBackupProgress()
+  );
+
   ipcMain.handle("trainingHub:getTrainingAnalytics", () =>
     getTrainingAnalytics()
   );
@@ -890,6 +929,12 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     "maps:routeWaypoints",
     (_event, request: RouteWaypointRequest) => routeWaypoints(request)
+  );
+
+  ipcMain.handle(
+    "maps:importRouteGpx",
+    (_event, activityType?: RouteActivityType) =>
+      importRouteFromGpx(activityType)
   );
 
   ipcMain.handle("maps:saveDrawnRoute", (_event, payload: DrawnRoutePayload) =>

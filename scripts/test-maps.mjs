@@ -418,4 +418,57 @@ assert.equal(freehand.points.length, 3);
 assert.ok(Math.abs(freehand.distanceMeters - 2 * latDegreeMeters) < 80);
 assert.equal(freehand.ascentMeters, undefined);
 
+// ---- GPX import ----
+const { parseGpxRoute, buildRouteFromGpxContent } = await import(
+  `${serviceUrl.href}?gpxImport=${Date.now()}`
+);
+
+const loopGpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Strava" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata><name>Harbour &amp; Park Loop</name></metadata>
+  <trk>
+    <name>Harbour &amp; Park Loop</name>
+    <trkseg>
+      <trkpt lat="43.6400" lon="-79.3800"><ele>80</ele></trkpt>
+      <trkpt lat="43.6500" lon="-79.3800"><ele>95.5</ele></trkpt>
+      <trkpt lat="43.6500" lon="-79.3900"><ele>90</ele></trkpt>
+      <trkpt lat="43.6400" lon="-79.3800"><ele>80</ele></trkpt>
+    </trkseg>
+  </trk>
+</gpx>`;
+
+const parsedLoop = parseGpxRoute(loopGpx);
+assert.equal(parsedLoop.name, "Harbour & Park Loop");
+assert.equal(parsedLoop.points.length, 4);
+assert.equal(parsedLoop.points[1].elevation, 95.5);
+
+const loopRoute = buildRouteFromGpxContent(loopGpx, "fallback", "running");
+assert.equal(loopRoute.name, "Harbour & Park Loop");
+assert.equal(loopRoute.mode, "loop");
+assert.equal(loopRoute.activityType, "running");
+assert.ok(loopRoute.distanceMeters > 2500 && loopRoute.distanceMeters < 4500);
+assert.equal(loopRoute.ascentMeters, 16);
+assert.equal(loopRoute.descentMeters, 16);
+assert.ok(loopRoute.bounds);
+
+// Planned courses that only carry <rtept> (and self-closing points) still load,
+// and an open track becomes a point-to-point route named after the file.
+const courseGpx = `<gpx version="1.1">
+  <rte>
+    <rtept lat='43.60' lon='-79.40'/>
+    <rtept lat='43.62' lon='-79.40'/>
+    <rtept lat='43.64' lon='-79.42'/>
+  </rte>
+</gpx>`;
+const courseRoute = buildRouteFromGpxContent(courseGpx, "sunday-course", "cycling-road");
+assert.equal(courseRoute.name, "sunday-course");
+assert.equal(courseRoute.mode, "point-to-point");
+assert.equal(courseRoute.points.length, 3);
+assert.equal(courseRoute.ascentMeters, undefined);
+
+assert.throws(
+  () => buildRouteFromGpxContent("<gpx></gpx>", "empty", "running"),
+  /No track or route points/
+);
+
 console.log("Maps service tests passed.");

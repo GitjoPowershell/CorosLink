@@ -12,6 +12,7 @@ import type {
   TrainingHubStatus,
   TrainingHubUpcomingWorkout
 } from "../../electron/types";
+import type { CorosLinkApi } from "../coroslink-api";
 
 export interface TrainingTrendPoint {
   date: string;
@@ -70,6 +71,7 @@ export interface HeatmapGrid {
 }
 
 export interface TrainingHubViewProps {
+  api: CorosLinkApi;
   status: TrainingHubStatus | null;
   email: string;
   password: string;

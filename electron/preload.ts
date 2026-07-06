@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
+  ActivityBackupProgress,
   BinaryStatus,
   CachedCorosMapPackage,
   CorosMapDownloadJob,
@@ -15,6 +16,7 @@ import type {
   GenerateRouteRequest,
   GeneratedRoute,
   LocalTrack,
+  RouteActivityType,
   RouteApiKeyValidation,
   RouteBuilderConfig,
   RouteGeocodeResult,
@@ -272,6 +274,30 @@ const api = {
     fileType: TrainingHubActivityFileType = 4
   ): Promise<TrainingHubExportResult> =>
     ipcRenderer.invoke("trainingHub:exportLatestActivityFile", fileType),
+  chooseActivityBackupFolder: (): Promise<string | null> =>
+    ipcRenderer.invoke("trainingHub:chooseBackupFolder"),
+  startActivityBackup: (
+    folder: string,
+    fileType: TrainingHubActivityFileType = 4
+  ): Promise<ActivityBackupProgress> =>
+    ipcRenderer.invoke("trainingHub:startActivityBackup", folder, fileType),
+  cancelActivityBackup: (): Promise<ActivityBackupProgress | null> =>
+    ipcRenderer.invoke("trainingHub:cancelActivityBackup"),
+  getActivityBackupProgress: (): Promise<ActivityBackupProgress | null> =>
+    ipcRenderer.invoke("trainingHub:getActivityBackupProgress"),
+  onActivityBackupProgress: (
+    callback: (progress: ActivityBackupProgress) => void
+  ): (() => void) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      progress: ActivityBackupProgress
+    ) => {
+      callback(progress);
+    };
+    ipcRenderer.on("trainingHub:backupProgress", listener);
+    return () =>
+      ipcRenderer.removeListener("trainingHub:backupProgress", listener);
+  },
   getTrainingAnalytics: (): Promise<TrainingHubAnalytics> =>
     ipcRenderer.invoke("trainingHub:getTrainingAnalytics"),
   getRacePredictor: (): Promise<TrainingHubRacePredictor> =>
@@ -376,6 +402,10 @@ const api = {
     ipcRenderer.invoke("maps:routeWaypoints", request),
   saveDrawnRoute: (payload: DrawnRoutePayload): Promise<GeneratedRoute> =>
     ipcRenderer.invoke("maps:saveDrawnRoute", payload),
+  importRouteGpx: (
+    activityType?: RouteActivityType
+  ): Promise<GeneratedRoute | null> =>
+    ipcRenderer.invoke("maps:importRouteGpx", activityType),
   exportGeneratedRoute: (id: string): Promise<string | null> =>
     ipcRenderer.invoke("maps:exportGeneratedRoute", id),
   deleteGeneratedRoute: (id: string): Promise<boolean> =>
