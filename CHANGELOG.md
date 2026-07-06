@@ -7,13 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Vertix 2, Vertix 2S, and Apex 2 Pro no longer misidentified as Pace Pro when connected over USB
+## [0.1.14] - 2026-07-06
 
 ### Added
 
-- Hero artwork for Vertix 2 and Vertix 2S on the dashboard when connected
+- **Paper light theme** — switch between dark and light UI from the header; window chrome and fullscreen layout follow the active theme
+- **Floating glass sidebar** — replaces header tabs with a collapsible sidebar for primary navigation
+- **Route Studio overhaul** — keyless routing, custom draw tool, Explore map layer, route sketch mode, and GPX import
+- **Bulk activity backup** — export multiple Training Hub activities at once
+- **Media library avatars** — playlist and source artwork in the media library
+- **Coach chat UI** — history sidebar, settings modal, and rich response cards
+- **Updates menu** — labeled **Updates** button in the header with check, download, and install actions plus auto-check/auto-download preferences (visible in dev builds too)
+- Hero artwork for **Vertix 2** and **Vertix 2S** on the dashboard when connected
+- Live GitHub stars and an expanded Buy Me a Coffee section on the marketing website
+
+### Changed
+
+- Route line styling so routes stand out on every base map
+- Provider switcher with animated indicator and icons
+- Apple Music playlist list now shows track counts
+
+### Fixed
+
+- Vertix 2, Vertix 2S, and Apex 2 Pro no longer misidentified as Pace Pro when connected over USB
+- COROS Training Hub re-auth race; added a **Reconnect** action when the session expires
 
 ## [0.1.13] - 2026-07-03
 
@@ -173,6 +190,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - GitHub Actions release workflow and installer build documentation
 
+[0.1.14]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.10...v0.1.11
