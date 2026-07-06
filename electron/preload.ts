@@ -74,6 +74,8 @@ import type {
 } from "./types";
 
 const api = {
+  // Host OS, so the renderer can reserve space for the macOS traffic lights.
+  platform: process.platform,
   getWatchStatus: (): Promise<WatchStatus> =>
     ipcRenderer.invoke("watch:getStatus"),
   getWatchConnectionSmokeOption: (): Promise<WatchConnectionSmokeOptionId> =>
@@ -492,7 +494,19 @@ const api = {
   uploadTrainingPlanDraft: (draftId: string): Promise<UploadPlanResult> =>
     ipcRenderer.invoke("chat:uploadPlanDraft", draftId),
   confirmWorkoutDelete: (requestId: string): Promise<DeleteWorkoutResult> =>
-    ipcRenderer.invoke("chat:confirmWorkoutDelete", requestId)
+    ipcRenderer.invoke("chat:confirmWorkoutDelete", requestId),
+  setWindowBackground: (color: string): Promise<void> =>
+    ipcRenderer.invoke("window:setBackground", color),
+  isWindowFullscreen: (): Promise<boolean> =>
+    ipcRenderer.invoke("window:isFullscreen"),
+  onWindowFullscreenChange: (
+    callback: (fullscreen: boolean) => void
+  ): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, fullscreen: boolean) =>
+      callback(fullscreen);
+    ipcRenderer.on("window:fullscreenChanged", listener);
+    return () => ipcRenderer.removeListener("window:fullscreenChanged", listener);
+  }
 };
 
 contextBridge.exposeInMainWorld("corosLink", api);
