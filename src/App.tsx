@@ -1529,7 +1529,6 @@ export default function App() {
                 onOpenLibrary={() => openMediaTab("library")}
                 onOpenYouTube={() => openMediaTab("youtube")}
                 onOpenSpotify={() => openMediaTab("spotify")}
-                onRefresh={handleRefresh}
               />
             ) : null}
             {activeView === "media" ? (
@@ -1965,7 +1964,6 @@ interface MediaOverviewTabProps {
   onOpenLibrary: () => void;
   onOpenYouTube: () => void;
   onOpenSpotify: () => void;
-  onRefresh: () => void;
 }
 
 function MediaOverviewTab({
@@ -1988,7 +1986,6 @@ function MediaOverviewTab({
   onOpenLibrary,
   onOpenYouTube,
   onOpenSpotify,
-  onRefresh,
 }: MediaOverviewTabProps) {
   const greeting = useTimeOfDayGreeting();
   const urlInputRef = useRef<HTMLInputElement>(null);
@@ -2033,19 +2030,6 @@ function MediaOverviewTab({
           <h1 className="dashboard-greeting">{greeting}</h1>
           <p className="dashboard-subtitle">{watchPresentation.companion}</p>
         </div>
-        <button
-          className="icon-button"
-          type="button"
-          title="Refresh watch and library"
-          onClick={onRefresh}
-          disabled={busy === "refresh"}
-        >
-          <RefreshCw
-            size={18}
-            aria-hidden="true"
-            className={busy === "refresh" ? "spin" : ""}
-          />
-        </button>
       </header>
 
       <div
