@@ -334,8 +334,10 @@ export function RouteMapCanvas({
         lineCap: "round",
         lineJoin: "round"
       }).addTo(layer);
-      addEndpoint(layer, linePoints[0]!, START_COLOR);
-      addEndpoint(layer, linePoints[linePoints.length - 1]!, END_COLOR);
+      if (!editing) {
+        addEndpoint(layer, linePoints[0]!, START_COLOR);
+        addEndpoint(layer, linePoints[linePoints.length - 1]!, END_COLOR);
+      }
       boundsPoints.push(...linePoints);
     }
 

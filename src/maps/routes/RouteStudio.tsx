@@ -147,10 +147,14 @@ export function RouteStudio({
         };
         if (pinTarget === "start") {
           setStart(resolved);
+          setCurrentLocation(null);
         } else {
           setDestination(resolved);
         }
+        setPreviewRoute(null);
+        setActiveSavedId(null);
         setPinTarget(null);
+        setFitRequestId((id) => id + 1);
       }
     },
     [mode, pinTarget, draw, sketch]
@@ -169,11 +173,38 @@ export function RouteStudio({
         };
         setStart(resolved);
         setCurrentLocation({ lat: result.lat, lon: result.lon });
+        setPreviewRoute(null);
+        setActiveSavedId(null);
         setPinTarget(null);
         setFitRequestId((id) => id + 1);
       })
       .catch((caught) => onError(toErrorMessage(caught)));
   }, [api, onError]);
+
+  const handleSelectStart = useCallback(
+    (point: ResolvedPoint) => {
+      onError(null);
+      setStart(point);
+      setCurrentLocation(null);
+      setPreviewRoute(null);
+      setActiveSavedId(null);
+      setPinTarget(null);
+      setFitRequestId((id) => id + 1);
+    },
+    [onError]
+  );
+
+  const handleSelectDestination = useCallback(
+    (point: ResolvedPoint) => {
+      onError(null);
+      setDestination(point);
+      setPreviewRoute(null);
+      setActiveSavedId(null);
+      setPinTarget(null);
+      setFitRequestId((id) => id + 1);
+    },
+    [onError]
+  );
 
   async function runGenerate(regenerate: boolean) {
     if (!start) {
@@ -504,8 +535,8 @@ export function RouteStudio({
               onElevationChange={setElevationPreference}
               start={start}
               destination={destination}
-              onSelectStart={setStart}
-              onSelectDestination={setDestination}
+              onSelectStart={handleSelectStart}
+              onSelectDestination={handleSelectDestination}
               pinTarget={pinTarget}
               onPinTargetChange={setPinTarget}
               onUseCurrent={handleUseCurrent}

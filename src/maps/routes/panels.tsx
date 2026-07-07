@@ -81,12 +81,14 @@ export function LocationSearchField({
   useEffect(() => {
     const trimmed = query.trim();
     if (trimmed.length < 3 || trimmed === value?.label) {
+      seq.current += 1;
       setResults([]);
+      setSearching(false);
       return;
     }
     const current = ++seq.current;
-    setSearching(true);
     const timer = setTimeout(() => {
+      setSearching(true);
       void api
         .searchRouteLocations(trimmed)
         .then((next) => {
@@ -148,8 +150,12 @@ export function LocationSearchField({
                   onSelect({
                     lat: result.lat,
                     lon: result.lon,
-                    label: result.label
+                    label: result.label,
+                    query: `${result.lat},${result.lon}`
                   });
+                  setQuery(result.label);
+                  setResults([]);
+                  setSearching(false);
                   setOpen(false);
                 }}
               >
