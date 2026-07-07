@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-07-07
+
+### Added
+
+- **Training Calendar** — new Calendar tab with month/week views; scheduled workouts and completed activities on the same grid; drag-and-drop to reschedule future workouts; add/delete workouts; week stats; **Ask Coach** handoff from a day or week
+- **Sleep summary in Training Hub** — nightly sleep score, duration, and stage breakdown (deep/light/REM/awake) from COROS MCP data
+- **Daily health metrics** — steps and calories tiles in Training Hub summary, sourced from COROS daily health data
+- **Startup default view** — choose which tab opens on launch (Overview, Media, Maps, Training Hub, Calendar, or Coach) from the header settings menu
+
+### Changed
+
+- Tighter app layout spacing across primary views
+- Updated Training Hub screenshot in docs
+
+### Fixed
+
+- COROS sleep data parsing — correct stage percentages and durations from MCP responses ([#28](https://github.com/JunAkerBuilds/CorosLink/pull/28))
+- Sleep stage bar contrast in light (Paper) theme
+- Route Studio location search — geocoding/search reliability in the route builder
+
 ## [0.1.14] - 2026-07-06
 
 ### Added
@@ -190,6 +210,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - GitHub Actions release workflow and installer build documentation
 
+[0.1.15]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.11...v0.1.12
