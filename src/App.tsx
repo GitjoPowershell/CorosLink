@@ -77,8 +77,15 @@ import {
   createInitialSidebarExpanded,
 } from "./components/AppSidebar";
 import { ResourcesMenu } from "./components/ResourcesMenu";
+import { StartupViewMenu } from "./components/StartupViewMenu";
 import { ThemeToggle } from "./theme/ThemeToggle";
 import { WatchConnectionSmokeControls } from "./components/WatchConnectionSmokeControls";
+import type { PrimaryView } from "./navigation/primaryNav";
+import {
+  getPrimaryViewLabel,
+  readStartupView,
+  saveStartupView,
+} from "./navigation/startupView";
 import { MapsView } from "./maps/MapsView";
 import { CalendarView } from "./calendar/CalendarView";
 import { ChatView } from "./chat/ChatView";
@@ -100,7 +107,7 @@ import {
 } from "./watchModels";
 import appLogo from "../build/icon.png";
 
-type View = "overview" | "media" | "training" | "calendar" | "maps" | "coach";
+type View = PrimaryView;
 type MediaTab =
   | "library"
   | "youtube"
@@ -123,7 +130,8 @@ interface YouTubeDownloadItem {
 
 export default function App() {
   const api: CorosLinkApi | undefined = window.corosLink;
-  const [activeView, setActiveView] = useState<View>("overview");
+  const [activeView, setActiveView] = useState<View>(readStartupView);
+  const [startupView, setStartupView] = useState<View>(readStartupView);
   const [sidebarExpanded, setSidebarExpanded] = useState(
     createInitialSidebarExpanded,
   );
@@ -1431,6 +1439,14 @@ export default function App() {
     setActiveMediaTab(tab);
   }
 
+  function handleStartupViewChange(view: View) {
+    setStartupView(view);
+    saveStartupView(view);
+    setMessage(
+      `Startup view set to ${getPrimaryViewLabel(view)}. It will open on next launch.`,
+    );
+  }
+
   const { toasts, dismissToast } = useToaster(
     message,
     error ?? watchStatus?.error ?? null,
@@ -1441,6 +1457,10 @@ export default function App() {
       <header className="app-header app-header--slim">
         <div className="app-header-end">
           <ThemeToggle />
+          <StartupViewMenu
+            value={startupView}
+            onChange={handleStartupViewChange}
+          />
           <ResourcesMenu />
           <AppUpdateControls
             snapshot={appUpdateSnapshot}
