@@ -79,7 +79,8 @@ import type {
   UploadPlanResult,
   IntervalsStatus,
   IntervalsActivityWithStatus,
-  DeleteWorkoutResult
+  DeleteWorkoutResult,
+  ManualActivityInput
 } from "./types";
 
 const api = {
@@ -390,6 +391,10 @@ const api = {
     fileExt: "fit" | "tcx" | "unknown"
   ): Promise<{ importId: string }> =>
     ipcRenderer.invoke("intervals:import", intervalsId, fileExt),
+  addManualActivityToCoros: (
+    input: ManualActivityInput
+  ): Promise<{ importId: string }> =>
+    ipcRenderer.invoke("coros:addManualActivity", input),
   getCorosMapManifest: (): Promise<CorosMapManifest> =>
     ipcRenderer.invoke("maps:getCorosManifest"),
   openCorosMapDownload: (downloadUrl: string): Promise<void> =>

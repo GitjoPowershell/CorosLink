@@ -78,7 +78,8 @@ import type {
   UploadPlanResult,
   IntervalsStatus,
   IntervalsActivityWithStatus,
-  DeleteWorkoutResult
+  DeleteWorkoutResult,
+  ManualActivityInput
 } from "../electron/types";
 
 export interface CorosLinkApi {
@@ -246,6 +247,9 @@ export interface CorosLinkApi {
   importIntervalsActivity: (
     intervalsId: string,
     fileExt: "fit" | "tcx" | "unknown"
+  ) => Promise<{ importId: string }>;
+  addManualActivityToCoros: (
+    input: ManualActivityInput
   ) => Promise<{ importId: string }>;
   getCorosMapManifest: () => Promise<CorosMapManifest>;
   openCorosMapDownload: (downloadUrl: string) => Promise<void>;

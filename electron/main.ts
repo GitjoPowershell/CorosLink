@@ -64,6 +64,7 @@ import {
   RECENT_IMPORT_WINDOW_MS
 } from "./intervalsService";
 import { isAlreadyOnCoros } from "./intervalsMatch";
+import { buildManualTcx } from "./tcxBuilder";
 import {
   cancelCorosMapDownload,
   cancelCorosMapInstall,
@@ -113,7 +114,8 @@ import type {
   TrainingHubExportResult,
   WatchConnectionSmokeOptionId,
   YouTubeMusicConfig,
-  IntervalsActivityWithStatus
+  IntervalsActivityWithStatus,
+  ManualActivityInput
 } from "./types";
 import {
   deleteWatchTrack,
@@ -1001,6 +1003,46 @@ function registerIpcHandlers(): void {
         const result = await uploadActivityFitToCoros(tmp);
         recordIntervalsImport(intervalsId);
         return result;
+      } finally {
+        try {
+          fs.rmSync(tmp);
+        } catch {
+          /* best effort */
+        }
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "coros:addManualActivity",
+    async (_event, input: ManualActivityInput): Promise<{ importId: string }> => {
+      if (!(input.durationSec > 0)) {
+        throw new Error("Duration must be greater than 0.");
+      }
+      if (Number.isNaN(Date.parse(input.startTimeIso))) {
+        throw new Error("Invalid start time.");
+      }
+      const toFiniteNonNegative = (value: unknown): number => {
+        const n = Number(value);
+        return Number.isFinite(n) && n > 0 ? n : 0;
+      };
+      const sanitized: ManualActivityInput = {
+        ...input,
+        distanceM: toFiniteNonNegative(input.distanceM),
+        calories: toFiniteNonNegative(input.calories),
+        avgHr:
+          input.avgHr != null && Number.isFinite(Number(input.avgHr)) && Number(input.avgHr) > 0
+            ? Number(input.avgHr)
+            : undefined
+      };
+      const tcx = buildManualTcx(sanitized);
+      const tmp = path.join(
+        os.tmpdir(),
+        `coroslink-manual-${Date.now()}.tcx`
+      );
+      fs.writeFileSync(tmp, tcx, "utf8");
+      try {
+        return await uploadActivityFitToCoros(tmp);
       } finally {
         try {
           fs.rmSync(tmp);
