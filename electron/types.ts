@@ -1369,3 +1369,12 @@ export interface IntervalsActivity {
 export interface IntervalsActivityWithStatus extends IntervalsActivity {
   onCoros: boolean;
 }
+
+export interface ManualActivityInput {
+  sport: "run" | "bike" | "other";
+  startTimeIso: string;
+  durationSec: number;
+  distanceM: number;
+  calories?: number;
+  avgHr?: number;
+}
