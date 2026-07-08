@@ -28,11 +28,21 @@ const raw = [
     elapsed_time: 1800,
     type: "Run",
     source_file: { type: "tcx" }
+  },
+  {
+    id: "i125",
+    name: "Stop-and-go Ride",
+    start_date: "2026-07-03T06:00:00Z",
+    moving_time: 3600,
+    elapsed_time: 3900,
+    distance: 30000,
+    type: "Ride",
+    source_file: { type: "fit" }
   }
 ];
 
 const parsed = parseIntervalsActivities(raw);
-assert.equal(parsed.length, 2);
+assert.equal(parsed.length, 3);
 assert.equal(parsed[0].intervalsId, "i123");
 assert.equal(parsed[0].name, "Morning Ride");
 assert.equal(parsed[0].startEpochMs, Date.parse("2026-07-01T06:00:00Z"));
@@ -44,5 +54,8 @@ assert.equal(parsed[1].name, "Unnamed");
 assert.equal(parsed[1].distanceM, 0);
 assert.equal(parsed[1].movingSec, 1800);
 assert.equal(parsed[1].fileExt, "tcx");
+
+// elapsed_time must win over moving_time (COROS only reports elapsed time).
+assert.equal(parsed[2].movingSec, 3900);
 
 console.log("intervals-service tests passed");

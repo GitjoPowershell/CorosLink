@@ -386,9 +386,10 @@ const api = {
   ): Promise<IntervalsActivityWithStatus[]> =>
     ipcRenderer.invoke("intervals:listMissing", daysBack),
   importIntervalsActivity: (
-    intervalsId: string
+    intervalsId: string,
+    fileExt: "fit" | "tcx" | "unknown"
   ): Promise<{ importId: string }> =>
-    ipcRenderer.invoke("intervals:import", intervalsId),
+    ipcRenderer.invoke("intervals:import", intervalsId, fileExt),
   getCorosMapManifest: (): Promise<CorosMapManifest> =>
     ipcRenderer.invoke("maps:getCorosManifest"),
   openCorosMapDownload: (downloadUrl: string): Promise<void> =>

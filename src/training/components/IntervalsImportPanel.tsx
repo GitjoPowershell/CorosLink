@@ -115,13 +115,16 @@ export function IntervalsImportPanel({ api }: { api: CorosLinkApi }) {
     }
   }
 
-  async function importOne(intervalsId: string) {
+  async function importOne(
+    intervalsId: string,
+    fileExt: "fit" | "tcx" | "unknown"
+  ) {
     setRowState((current) => ({
       ...current,
       [intervalsId]: { busy: true, error: null }
     }));
     try {
-      await api.importIntervalsActivity(intervalsId);
+      await api.importIntervalsActivity(intervalsId, fileExt);
       setRows((current) =>
         current.map((row) =>
           row.intervalsId === intervalsId ? { ...row, onCoros: true } : row
@@ -147,7 +150,7 @@ export function IntervalsImportPanel({ api }: { api: CorosLinkApi }) {
     try {
       const missing = rows.filter((row) => !row.onCoros);
       for (const row of missing) {
-        await importOne(row.intervalsId);
+        await importOne(row.intervalsId, row.fileExt);
       }
     } finally {
       setImportingAll(false);
@@ -354,7 +357,9 @@ export function IntervalsImportPanel({ api }: { api: CorosLinkApi }) {
                                   type="button"
                                   className="secondary-button compact-button"
                                   disabled={busy || importingAll}
-                                  onClick={() => void importOne(row.intervalsId)}
+                                  onClick={() =>
+                                    void importOne(row.intervalsId, row.fileExt)
+                                  }
                                 >
                                   {busy ? (
                                     <Loader2

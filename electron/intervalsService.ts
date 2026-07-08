@@ -23,7 +23,11 @@ function readSecret(key: string): string | undefined {
   try {
     return safeStorage.decryptString(Buffer.from(raw, "base64"));
   } catch {
-    return raw;
+    // Decryption failed (e.g. OS keychain unavailable/changed). Do NOT return
+    // the raw ciphertext — it would be sent as the API key and produce a
+    // confusing 401. Treat the user as disconnected instead.
+    console.warn(`Failed to decrypt secret for "${key}"; treating as unset.`);
+    return undefined;
   }
 }
 
@@ -86,7 +90,13 @@ export function parseIntervalsActivities(raw: any[]): IntervalsActivity[] {
       intervalsId: String(a.id),
       name: a.name ?? "Unnamed",
       startEpochMs: start ? Date.parse(start) : 0,
-      movingSec: Number(a.moving_time ?? a.movingTime ?? a.elapsed_time ?? 0),
+      // COROS's activity list only exposes ELAPSED time (raw.totalTime), so we
+      // must prefer elapsed here too — comparing elapsed-vs-moving would flag
+      // activities with stops (e.g. cycling) as false "Missing" and cause
+      // duplicate imports.
+      movingSec: Number(
+        a.elapsed_time ?? a.elapsedTime ?? a.moving_time ?? a.movingTime ?? 0
+      ),
       distanceM: Number(a.distance ?? 0),
       type: String(a.type ?? ""),
       fileExt: fileExtOf(a)

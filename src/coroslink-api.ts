@@ -244,7 +244,8 @@ export interface CorosLinkApi {
     daysBack: number
   ) => Promise<IntervalsActivityWithStatus[]>;
   importIntervalsActivity: (
-    intervalsId: string
+    intervalsId: string,
+    fileExt: "fit" | "tcx" | "unknown"
   ) => Promise<{ importId: string }>;
   getCorosMapManifest: () => Promise<CorosMapManifest>;
   openCorosMapDownload: (downloadUrl: string) => Promise<void>;
