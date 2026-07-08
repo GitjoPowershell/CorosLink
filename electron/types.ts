@@ -1365,3 +1365,7 @@ export interface IntervalsActivity {
   type: string;
   fileExt: "fit" | "tcx" | "unknown";
 }
+
+export interface IntervalsActivityWithStatus extends IntervalsActivity {
+  onCoros: boolean;
+}

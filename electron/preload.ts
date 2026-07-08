@@ -77,6 +77,8 @@ import type {
   CorosMcpTool,
   CorosTrainingPlanDraftInput,
   UploadPlanResult,
+  IntervalsStatus,
+  IntervalsActivityWithStatus,
   DeleteWorkoutResult
 } from "./types";
 
@@ -370,6 +372,23 @@ const api = {
     draft: CorosTrainingPlanDraftInput
   ): Promise<UploadPlanResult> =>
     ipcRenderer.invoke("trainingHub:uploadTrainingPlan", draft),
+  getIntervalsStatus: (): Promise<IntervalsStatus> =>
+    ipcRenderer.invoke("intervals:getStatus"),
+  connectIntervals: (
+    apiKey: string,
+    athleteId: string
+  ): Promise<IntervalsStatus> =>
+    ipcRenderer.invoke("intervals:connect", apiKey, athleteId),
+  disconnectIntervals: (): Promise<void> =>
+    ipcRenderer.invoke("intervals:disconnect"),
+  listMissingIntervalsActivities: (
+    daysBack: number
+  ): Promise<IntervalsActivityWithStatus[]> =>
+    ipcRenderer.invoke("intervals:listMissing", daysBack),
+  importIntervalsActivity: (
+    intervalsId: string
+  ): Promise<{ importId: string }> =>
+    ipcRenderer.invoke("intervals:import", intervalsId),
   getCorosMapManifest: (): Promise<CorosMapManifest> =>
     ipcRenderer.invoke("maps:getCorosManifest"),
   openCorosMapDownload: (downloadUrl: string): Promise<void> =>

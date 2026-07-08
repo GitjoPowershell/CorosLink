@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { deleteDownload, getDownloadById, initializeDatabase, listDownloads, markDownloadTransferred, clearDownloadTransferredByFileName } from "./database";
 import { downloadAudio, getBinaryStatus } from "./downloadService";
@@ -49,8 +50,17 @@ import {
   loginTrainingHub,
   logoutTrainingHub,
   reconnectTrainingHub,
+  uploadActivityFitToCoros,
   uploadTrainingPlan
 } from "./trainingHubService";
+import {
+  getIntervalsStatus,
+  connectIntervals,
+  disconnectIntervals,
+  listIntervalsActivities,
+  downloadIntervalsFit
+} from "./intervalsService";
+import { isAlreadyOnCoros } from "./intervalsMatch";
 import {
   cancelCorosMapDownload,
   cancelCorosMapInstall,
@@ -99,7 +109,8 @@ import type {
   TrainingHubActivityFileType,
   TrainingHubExportResult,
   WatchConnectionSmokeOptionId,
-  YouTubeMusicConfig
+  YouTubeMusicConfig,
+  IntervalsActivityWithStatus
 } from "./types";
 import {
   deleteWatchTrack,
@@ -897,6 +908,60 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle("trainingHub:getDailyHealthData", (_event, days?: number) =>
     getTrainingDailyHealthData(mainWindow, days ?? 1)
+  );
+
+  ipcMain.handle("intervals:getStatus", () => getIntervalsStatus());
+
+  ipcMain.handle("intervals:connect", (_event, apiKey: string, athleteId: string) =>
+    connectIntervals(apiKey, athleteId)
+  );
+
+  ipcMain.handle("intervals:disconnect", () => disconnectIntervals());
+
+  ipcMain.handle(
+    "intervals:listMissing",
+    async (_event, daysBack: number): Promise<IntervalsActivityWithStatus[]> => {
+      const intervals = await listIntervalsActivities(daysBack);
+      // Pull enough COROS activities to cover the window and map to MatchableActivity.
+      // COROS `startTime` is epoch seconds, `duration` is seconds, `distance` is meters.
+      const corosRaw = await listTrainingHubActivities(1, 200);
+      const coros = corosRaw.map((a) => ({
+        startEpochMs: (a.startTime ?? 0) * 1000,
+        movingSec: a.duration ?? 0,
+        distanceM: a.distance ?? 0
+      }));
+      return intervals.map((a) => ({
+        ...a,
+        onCoros: isAlreadyOnCoros(
+          {
+            startEpochMs: a.startEpochMs,
+            movingSec: a.movingSec,
+            distanceM: a.distanceM
+          },
+          coros
+        )
+      }));
+    }
+  );
+
+  ipcMain.handle(
+    "intervals:import",
+    async (_event, intervalsId: string): Promise<{ importId: string }> => {
+      const tmp = path.join(
+        os.tmpdir(),
+        `coroslink-intervals-${intervalsId}.fit`
+      );
+      try {
+        await downloadIntervalsFit(intervalsId, tmp);
+        return await uploadActivityFitToCoros(tmp);
+      } finally {
+        try {
+          fs.rmSync(tmp);
+        } catch {
+          /* best effort */
+        }
+      }
+    }
   );
 
   ipcMain.handle("maps:getCorosManifest", () => getCorosMapManifest());
