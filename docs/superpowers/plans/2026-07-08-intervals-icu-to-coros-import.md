@@ -25,6 +25,40 @@
 
 ---
 
+### Task 0: Local environment setup
+
+The repo was cloned without dependencies. Every later task runs
+`npm run build:electron` (and unit tests), which needs `node_modules` and the
+native `better-sqlite3` binding rebuilt for Electron. Do this once before Task 1.
+
+**Files:** none created (environment only).
+
+- [ ] **Step 1: Install dependencies**
+
+Run: `npm install`
+Expected: completes without errors; `node_modules/` present.
+
+- [ ] **Step 2: Rebuild native modules for Electron**
+
+Run: `npm run rebuild`
+Expected: `electron-builder install-app-deps` rebuilds `better-sqlite3` for the
+installed Electron version without errors.
+
+- [ ] **Step 3: Verify the electron build compiles the current code**
+
+Run: `npm run build:electron`
+Expected: `tsc -p tsconfig.electron.json` succeeds, `dist-electron/` populated.
+
+- [ ] **Step 4: Verify an existing unit test runs (sanity check of the harness)**
+
+Run: `npm run test:activity-backup`
+Expected: `activity backup tests passed` (proves the `dist-electron` import +
+`node:assert` test pattern works in this environment before we add our own).
+
+No commit — this task only prepares the local environment.
+
+---
+
 ### Task 1: AWS SigV4 request signer
 
 **Files:**
@@ -1374,7 +1408,11 @@ git commit -m "feat: add intervals.icu import panel to Training Hub"
 
 ---
 
-## Final integration & PR
+## Final integration, local validation gate & PR
+
+**This gate is mandatory and must pass before any PR is opened.** The user
+requires a full local build + test + debug + validation pass on the assembled app
+first. Do not run the fork/PR steps until every box below is checked.
 
 - [ ] **Run every new unit test:**
 
@@ -1387,9 +1425,40 @@ npm run test:intervals-service
 ```
 All must print their `... tests passed` line.
 
-- [ ] **Full build:** `npm run build` — no errors.
+- [ ] **Full type-check + build of the whole app:**
 
-- [ ] **Fork + PR** (delivery per the spec):
+Run: `npm run build`
+Expected: `build:electron` (tsc) and `build:renderer` (tsc --noEmit + vite build)
+both succeed with no errors.
+
+- [ ] **Tracer-bullet upload confirmed** (from Task 4, real COROS account):
+`node scripts/spike-coros-upload.mjs <a-real.fit>` returned a non-empty
+`importId` and the activity appeared in COROS. If this was deferred, run it now —
+the PR must not ship an unverified upload path.
+
+- [ ] **Run the assembled app locally and validate the full feature end-to-end:**
+
+Run: `npm run dev`
+Then, in the running app:
+1. Open **Training Hub**, log into COROS.
+2. In the **Import from intervals.icu** panel, connect with a real API key +
+   athlete id. Confirm the connected state renders.
+3. **Refresh** and confirm activities load with correct **On COROS** / **Missing**
+   badges (spot-check one known-synced and one known-missing activity).
+4. **Import** one missing activity; confirm the row flips to **On COROS** and the
+   activity appears in the COROS web/phone app within ~1 minute.
+5. Exercise an error path (e.g. a bad API key) and confirm a clear inline message,
+   and that one failed import does not abort **Import all missing**.
+
+- [ ] **Debug pass:** watch the Electron main-process console and the renderer
+devtools during the run. Resolve any thrown errors, unhandled rejections, or
+console warnings introduced by this feature before proceeding.
+
+- [ ] **Regression check:** confirm the rest of Training Hub (activity table,
+backup panel, charts) still renders and the app launches cleanly — the new panel
+must not break existing views.
+
+- [ ] **Only after every box above is checked — Fork + PR** (delivery per the spec):
 
 ```bash
 gh repo fork JunAkerBuilds/CorosLink --remote --remote-name origin
