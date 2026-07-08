@@ -514,6 +514,26 @@ export default function App() {
     handleTrainingHubActivityDetail,
   ]);
 
+  // Decorative animations and polling stay hot even when nobody is looking;
+  // flag the backgrounded state so CSS can pause them and refreshes can skip.
+  useEffect(() => {
+    const update = () => {
+      document.body.classList.toggle(
+        "is-backgrounded",
+        document.hidden || !document.hasFocus(),
+      );
+    };
+    update();
+    document.addEventListener("visibilitychange", update);
+    window.addEventListener("focus", update);
+    window.addEventListener("blur", update);
+    return () => {
+      document.removeEventListener("visibilitychange", update);
+      window.removeEventListener("focus", update);
+      window.removeEventListener("blur", update);
+    };
+  }, []);
+
   useEffect(() => {
     if (!api) {
       return;
@@ -531,8 +551,11 @@ export default function App() {
     });
 
     const interval = window.setInterval(() => {
+      if (document.hidden) {
+        return;
+      }
       void refreshAll();
-    }, 5000);
+    }, 15000);
 
     return () => window.clearInterval(interval);
   }, [
