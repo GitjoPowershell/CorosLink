@@ -35,6 +35,7 @@
     "test:aws-sigv4": "npm run build:electron && node scripts/test-aws-sigv4.mjs",
     "test:zip-store": "npm run build:electron && node scripts/test-zip-store.mjs",
     "test:coros-upload-config": "npm run build:electron && node scripts/test-coros-upload-config.mjs",
+    "test:intervals-service": "npm run build:electron && node scripts/test-intervals-service.mjs",
     "start": "npm run build && electron .",
     "icons:generate": "node scripts/generate-icons.mjs",
     "dmg:background": "python3 scripts/generate-dmg-background.py",

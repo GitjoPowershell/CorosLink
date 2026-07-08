@@ -1350,3 +1350,18 @@ export type PersistedChatEntry =
   | { kind: "activityHrTrend"; preview: ActivityHrTrendPreview }
   | { kind: "fitnessTrend"; preview: FitnessTrendPreview }
   | { kind: "hrZoneSummary"; preview: HrZonePreview };
+
+export interface IntervalsStatus {
+  connected: boolean;
+  athleteId?: string;
+}
+
+export interface IntervalsActivity {
+  intervalsId: string;
+  name: string;
+  startEpochMs: number;
+  movingSec: number;
+  distanceM: number;
+  type: string;
+  fileExt: "fit" | "tcx" | "unknown";
+}
