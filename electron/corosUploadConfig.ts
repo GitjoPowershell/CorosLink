@@ -33,9 +33,12 @@ export function stsRequestUrl(region: CorosRegion): string {
 }
 
 export function decodeStsCredentials(rawCredentials: string): StsCredentials {
-  const base64 = rawCredentials.startsWith(SALT)
-    ? rawCredentials.slice(SALT.length)
-    : rawCredentials;
+  // COROS appends the salt as a SUFFIX to the base64 payload (verified live:
+  // the credentials string ends with SALT). Strip it from the end; fall back to
+  // removing a single occurrence anywhere for resilience if the format shifts.
+  const base64 = rawCredentials.endsWith(SALT)
+    ? rawCredentials.slice(0, -SALT.length)
+    : rawCredentials.replace(SALT, "");
   const json = Buffer.from(base64, "base64").toString("utf8");
   return JSON.parse(json) as StsCredentials;
 }

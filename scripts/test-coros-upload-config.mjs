@@ -20,30 +20,33 @@ assert.match(usUrl, /sign=E34EF0E34A498A54A9C3EAEFC12B7CAF/);
 assert.match(stsRequestUrl("EU"), /bucket=eu-coros/);
 assert.match(stsRequestUrl("EU"), /sign=877571111A1EE5316E4B590103D4B5B3/);
 
-// decode: salt-prefixed base64 of a JSON creds object.
+// decode: COROS returns base64(JSON) with the salt appended as a SUFFIX
+// (verified live against faq.coros.com/openapi/oss/sts — the credentials
+// string ENDS with SALT and the base64 starts immediately).
 const creds = {
-  Region: "us-east-1",
+  Region: "us-west-1",
   Bucket: "coros-s3",
   AccessKeyId: "AKID",
   SecretAccessKey: "SECRET",
   SessionToken: "TOKEN"
 };
-const encoded = SALT + Buffer.from(JSON.stringify(creds)).toString("base64");
+const encoded = Buffer.from(JSON.stringify(creds)).toString("base64") + SALT;
 assert.deepEqual(decodeStsCredentials(encoded), creds);
 
-// Prefix-safe: only the leading salt is stripped, not a later occurrence.
+// The base64 payload itself ends with "=" padding before the salt (real
+// responses look like "...In0=9y78gpoERW4lBNYL"); the suffix strip must remove
+// only the trailing salt and leave the padding intact.
 const payload2 = {
-  Region: "eu",
+  Region: "eu-west-1",
   Bucket: "eu-coros",
   AccessKeyId: "A",
   SecretAccessKey: "S",
   SessionToken: "T"
 };
 const b64 = Buffer.from(JSON.stringify(payload2)).toString("base64");
-// Verify that decoding SALT + b64 correctly yields payload2 (demonstrates prefix-only stripping).
-const encoded2 = SALT + b64;
-assert.deepEqual(decodeStsCredentials(encoded2), payload2);
-// Additionally verify that only the leading SALT is removed by slice:
-assert.equal(b64, encoded2.slice(SALT.length));
+assert.ok(b64.endsWith("="), "sanity: this fixture's base64 has = padding");
+assert.deepEqual(decodeStsCredentials(b64 + SALT), payload2);
+// Suffix strip leaves the base64 (with padding) intact:
+assert.equal(b64, (b64 + SALT).slice(0, -SALT.length));
 
 console.log("coros-upload-config tests passed");
