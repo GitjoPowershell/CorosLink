@@ -28,6 +28,7 @@ import {
   setActivityBackupProgressListener,
   startActivityBackup
 } from "./activityBackupService";
+import { getAppInfo, openAppStorageLocation } from "./appInfoService";
 import {
   getActivityPaceBaselines,
   getDailyMetrics,
@@ -1037,4 +1038,10 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle("app:quitAndInstallUpdate", () => quitAndInstallUpdate());
+
+  ipcMain.handle("app:getInfo", () => getAppInfo());
+
+  ipcMain.handle("app:openStorageLocation", (_event, id: string) =>
+    openAppStorageLocation(id)
+  );
 }

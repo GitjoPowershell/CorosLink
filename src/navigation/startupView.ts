@@ -4,7 +4,9 @@ const DEFAULT_STARTUP_VIEW: PrimaryView = "overview";
 const STARTUP_VIEW_STORAGE_KEY = "coroslink.startupView";
 
 function isPrimaryView(value: string | null): value is PrimaryView {
-  return PRIMARY_NAV_ITEMS.some((item) => item.id === value);
+  return PRIMARY_NAV_ITEMS.some(
+    (item) => item.id === value && !item.excludeFromStartup,
+  );
 }
 
 export function getPrimaryViewLabel(view: PrimaryView): string {

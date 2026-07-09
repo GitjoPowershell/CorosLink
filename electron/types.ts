@@ -962,6 +962,28 @@ export interface AppUpdateSnapshot {
   autoDownload: boolean;
 }
 
+export interface AppStorageLocation {
+  id: string;
+  label: string;
+  description: string;
+  path: string;
+  kind: "directory" | "file";
+  exists: boolean;
+  /** Null when the location does not exist or its size could not be read. */
+  sizeBytes: number | null;
+}
+
+export interface AppInfo {
+  version: string;
+  electronVersion: string;
+  chromeVersion: string;
+  nodeVersion: string;
+  platform: string;
+  arch: string;
+  userDataPath: string;
+  storageLocations: AppStorageLocation[];
+}
+
 // ----- Training Coach chatbot -----
 
 export type ChatRole = "user" | "assistant";

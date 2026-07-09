@@ -93,4 +93,42 @@ withReleaseDir((releaseDir) => {
   );
 });
 
+withReleaseDir((releaseDir) => {
+  const macVersion = "1.2.3";
+  const files = [
+    `CorosLink-${macVersion}-arm64.dmg`,
+    `CorosLink-${macVersion}-x64.dmg`,
+    `CorosLink-${macVersion}-arm64.zip`,
+    `CorosLink-${macVersion}-x64.zip`
+  ];
+
+  for (const file of files) {
+    writeReleaseFile(releaseDir, file);
+    writeReleaseFile(releaseDir, `${file}.blockmap`);
+  }
+
+  writeReleaseFile(
+    releaseDir,
+    "latest-mac.yml",
+    [
+      `version: ${macVersion}`,
+      "files:",
+      `  - url: CorosLink-${macVersion}-arm64.dmg`,
+      "    sha512: test-sha",
+      "    size: 123",
+      `  - url: CorosLink-${macVersion}-x64.dmg`,
+      "    sha512: test-sha",
+      "    size: 123",
+      "releaseDate: '2026-06-30T00:00:00.000Z'",
+      ""
+    ].join("\n")
+  );
+
+  verifyPlatform("macos", {
+    releaseDir,
+    expectedVersion: macVersion,
+    logger
+  });
+});
+
 console.log("release artifact verifier tests passed");

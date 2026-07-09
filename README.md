@@ -230,6 +230,7 @@ Get the latest installer from **[GitHub Releases](https://github.com/JunAkerBuil
 | Platform              | File                          |
 | --------------------- | ----------------------------- |
 | macOS (Apple Silicon) | `CorosLink-*-arm64.dmg`       |
+| macOS (Intel)         | `CorosLink-*-x64.dmg`         |
 | Windows               | `CorosLink Setup *.exe`       |
 | Linux (x64)           | `CorosLink-*-x86_64.AppImage` |
 
@@ -325,6 +326,12 @@ To prepare Linux x64 media binaries from any platform:
 
 ```sh
 npm run binaries:prepare:linux
+```
+
+To prepare both macOS architectures (Apple Silicon and Intel) from any platform:
+
+```sh
+npm run binaries:prepare:mac
 ```
 
 For hardware-free watch detection checks, set `COROS_WATCH_PATH=/path/to/mock-watch` with a `Music` folder, or run:
@@ -428,7 +435,7 @@ git tag v0.1.5
 git push origin main v0.1.5
 ```
 
-2. That triggers the [Release installers](.github/workflows/release.yml) workflow. CI syncs the tag into `package.json` before building, then verifies the versions match, so installer names like `CorosLink-0.1.5-arm64.dmg` always follow the git tag. The workflow also uploads `latest-mac.yml`, `latest-linux.yml`, and `latest.yml` plus macOS/Windows blockmaps so packaged apps can auto-update via `electron-updater` (Linux AppImage embeds its blockmap in the file). Each platform build runs `scripts/verify-release-artifacts.mjs` and fails if update metadata is missing.
+2. That triggers the [Release installers](.github/workflows/release.yml) workflow. CI syncs the tag into `package.json` before building, then verifies the versions match, so installer names like `CorosLink-0.1.5-arm64.dmg` and `CorosLink-0.1.5-x64.dmg` always follow the git tag. The workflow also uploads `latest-mac.yml`, `latest-linux.yml`, and `latest.yml` plus macOS/Windows blockmaps so packaged apps can auto-update via `electron-updater` (Linux AppImage embeds its blockmap in the file). Each platform build runs `scripts/verify-release-artifacts.mjs` and fails if update metadata is missing.
 
 You can also run the workflow manually from **Actions → Release installers** (it uses the current `package.json` version when no tag is pushed).
 

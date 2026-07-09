@@ -10,6 +10,7 @@
     "dev:renderer": "vite --host 127.0.0.1",
     "dev:electron": "wait-on tcp:5173 && npm run binaries:prepare && npm run build:electron && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
     "binaries:prepare": "node scripts/prepare-binaries.mjs",
+    "binaries:prepare:mac": "node scripts/prepare-binaries.mjs --platform=darwin --arch=arm64 && node scripts/prepare-binaries.mjs --platform=darwin --arch=x64",
     "binaries:prepare:win": "node scripts/prepare-binaries.mjs --platform=win32 --arch=x64",
     "binaries:prepare:linux": "node scripts/prepare-binaries.mjs --platform=linux --arch=x64",
     "build": "npm run build:electron && npm run build:renderer",
@@ -36,7 +37,7 @@
     "dmg:background": "python3 scripts/generate-dmg-background.py",
     "rebuild": "electron-builder install-app-deps",
     "dist": "npm run binaries:prepare && npm run build && electron-builder --publish never",
-    "dist:mac": "npm run binaries:prepare && npm run build && electron-builder --mac --publish never",
+    "dist:mac": "npm run binaries:prepare:mac && npm run build && electron-builder --mac --arm64 --x64 --publish never",
     "dist:win": "npm run binaries:prepare:win && npm run build && electron-builder --win nsis --x64 --publish never",
     "dist:linux": "npm run binaries:prepare:linux && npm run build && electron-builder --linux AppImage --x64 --publish never",
     "release:prepare": "node scripts/prepare-release.mjs",
@@ -102,6 +103,7 @@
         "dmg",
         "zip"
       ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
       "category": "public.app-category.music",
       "icon": "build/icon.icns",
       "identity": "-"

@@ -87,6 +87,7 @@ import {
   saveStartupView,
 } from "./navigation/startupView";
 import { MapsView } from "./maps/MapsView";
+import { SettingsView } from "./settings/SettingsView";
 import { CalendarView } from "./calendar/CalendarView";
 import { ChatView } from "./chat/ChatView";
 import {
@@ -1661,6 +1662,15 @@ export default function App() {
                 onRefresh={handleTrainingHubRefresh}
                 onLoadDetail={handleTrainingHubActivityDetail}
                 onExportFile={handleTrainingHubExport}
+              />
+            ) : null}
+            {activeView === "settings" ? (
+              <SettingsView
+                api={api}
+                updateSnapshot={appUpdateSnapshot}
+                updateBusy={busy === "update-check"}
+                onCheckForUpdates={() => void handleCheckForUpdates()}
+                onError={setError}
               />
             ) : null}
             {activeView === "calendar" ? (

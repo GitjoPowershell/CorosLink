@@ -13,8 +13,18 @@ const PLATFORM_CHECKS = {
   macos: {
     label: "macOS",
     metadataFile: "latest-mac.yml",
-    requiredPatterns: [/\.dmg$/i, /\.zip$/i],
-    blockmapPatterns: [/\.dmg\.blockmap$/i, /\.zip\.blockmap$/i]
+    requiredPatterns: [
+      /-arm64\.dmg$/i,
+      /-x64\.dmg$/i,
+      /-arm64\.zip$/i,
+      /-x64\.zip$/i
+    ],
+    blockmapPatterns: [
+      /-arm64\.dmg\.blockmap$/i,
+      /-x64\.dmg\.blockmap$/i,
+      /-arm64\.zip\.blockmap$/i,
+      /-x64\.zip\.blockmap$/i
+    ]
   },
   windows: {
     label: "Windows",
