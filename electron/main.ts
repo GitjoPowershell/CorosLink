@@ -338,15 +338,22 @@ function applyAppIcon(): void {
   }
 }
 
+const ALLOWED_PERMISSIONS = new Set([
+  "geolocation",
+  // Lets the renderer copy text (e.g. the Spotify Redirect URI) via
+  // navigator.clipboard.writeText.
+  "clipboard-sanitized-write"
+]);
+
 function configureAppPermissions(): void {
   session.defaultSession.setPermissionRequestHandler(
     (_webContents, permission, callback) => {
-      callback(permission === "geolocation");
+      callback(ALLOWED_PERMISSIONS.has(permission));
     }
   );
 
-  session.defaultSession.setPermissionCheckHandler(
-    (_webContents, permission) => permission === "geolocation"
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) =>
+    ALLOWED_PERMISSIONS.has(permission)
   );
 }
 

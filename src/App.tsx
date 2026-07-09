@@ -4,6 +4,7 @@ import {
   ArrowRight,
   BatteryFull,
   CheckCircle2,
+  Copy,
   Download,
   ExternalLink,
   Feather,
@@ -3998,6 +3999,15 @@ function SpotifySyncView({
     }
   }
 
+  async function handleCopyRedirectUri() {
+    try {
+      await navigator.clipboard.writeText(config.redirectUri);
+      onMessage("Redirect URI copied.");
+    } catch (caught) {
+      onError(toErrorMessage(caught));
+    }
+  }
+
   return (
     <div className="stack stack-fill">
       <section className="panel spotify-account-panel">
@@ -4044,72 +4054,162 @@ function SpotifySyncView({
             </div>
           </div>
         ) : (
-          <>
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">Spotify OAuth</p>
+          <div className="spotify-connect spotify-connect--spotify">
+            <div className="spotify-connect-header">
+              <div
+                className="spotify-account-mark spotify-brand-mark"
+                aria-hidden="true"
+              >
+                <SpotifyBrandIcon size={26} />
+              </div>
+              <div className="spotify-account-copy">
+                <p className="eyebrow">Spotify</p>
                 <h2>Connect Spotify</h2>
+                <span>
+                  Create a free Spotify Developer app, then add its
+                  credentials here.
+                </span>
               </div>
               <span className="badge">Not connected</span>
             </div>
 
-            <form className="settings-grid" onSubmit={onConfigSubmit}>
-              <label className="field">
-                <span>Client ID</span>
-                <input
-                  value={config.clientId}
-                  onChange={(event) =>
-                    onConfigChange({ ...config, clientId: event.target.value })
-                  }
-                  placeholder="Spotify app client ID"
-                  disabled={busy === "spotify-config"}
-                />
-              </label>
-              <label className="field">
-                <span>Client Secret</span>
-                <input
-                  value={config.clientSecret}
-                  onChange={(event) =>
-                    onConfigChange({
-                      ...config,
-                      clientSecret: event.target.value,
-                    })
-                  }
-                  placeholder="Spotify app client secret"
-                  type="password"
-                  disabled={busy === "spotify-config"}
-                />
-              </label>
-              <label className="field">
-                <span>Redirect URI</span>
-                <input value={config.redirectUri} readOnly />
-              </label>
+            <div className="spotify-connect-layout">
+              <section
+                className="spotify-connect-guide"
+                aria-labelledby="spotify-setup-title"
+              >
+                <div className="spotify-connect-guide-heading">
+                  <h3 id="spotify-setup-title">Set up your Spotify app</h3>
+                  <p>Complete these steps in the Spotify Developer Dashboard.</p>
+                </div>
 
-              <div className="settings-actions">
-                <button
-                  className="secondary-button"
-                  type="submit"
-                  disabled={busy === "spotify-config"}
-                >
-                  <Settings size={17} aria-hidden="true" />
-                  Save
-                </button>
-                <button
-                  className="primary-button"
-                  type="button"
-                  disabled={!status?.configured || busy === "spotify-login"}
-                  onClick={onLogin}
-                >
-                  {busy === "spotify-login" ? (
-                    <Loader2 className="spin" size={17} aria-hidden="true" />
-                  ) : (
-                    <LogIn size={17} aria-hidden="true" />
-                  )}
-                  Log in
-                </button>
-              </div>
-            </form>
-          </>
+                <ol className="spotify-connect-steps">
+                  <li>
+                    <div className="spotify-connect-step-copy">
+                      <strong>Create an app</strong>
+                      <span>
+                        Open the dashboard, select Create app, then add any app
+                        name and description.
+                      </span>
+                    </div>
+                    <a
+                      className="spotify-dashboard-link"
+                      href="https://developer.spotify.com/dashboard"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <ExternalLink size={15} aria-hidden="true" />
+                      Open dashboard
+                    </a>
+                  </li>
+                  <li>
+                    <div className="spotify-connect-step-copy">
+                      <strong>Add the Redirect URI</strong>
+                      <span>
+                        Copy the URI from the credentials panel, add it under
+                        Redirect URIs, select Web API, then save the app.
+                      </span>
+                    </div>
+                  </li>
+                  <li>
+                    <div className="spotify-connect-step-copy">
+                      <strong>Paste your credentials</strong>
+                      <span>
+                        Open Settings in the new app, copy the Client ID and
+                        Client secret, then save and log in here.
+                      </span>
+                    </div>
+                  </li>
+                </ol>
+              </section>
+
+              <form className="spotify-connect-form" onSubmit={onConfigSubmit}>
+                <div className="spotify-credentials-heading">
+                  <h3>Add app credentials</h3>
+                  <span>Use the values from your Spotify app Settings page.</span>
+                </div>
+
+                <label className="field spotify-redirect-field">
+                  <span>Redirect URI</span>
+                  <div className="spotify-redirect-row">
+                    <input value={config.redirectUri} readOnly />
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={!config.redirectUri}
+                      onClick={() => void handleCopyRedirectUri()}
+                    >
+                      <Copy size={17} aria-hidden="true" />
+                      Copy URI
+                    </button>
+                  </div>
+                  <small>Add this exact address to your Spotify app.</small>
+                </label>
+
+                <label className="field">
+                  <span>Client ID</span>
+                  <input
+                    value={config.clientId}
+                    onChange={(event) =>
+                      onConfigChange({ ...config, clientId: event.target.value })
+                    }
+                    placeholder="Spotify app client ID"
+                    disabled={busy === "spotify-config"}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="field">
+                  <span>Client Secret</span>
+                  <input
+                    value={config.clientSecret}
+                    onChange={(event) =>
+                      onConfigChange({
+                        ...config,
+                        clientSecret: event.target.value,
+                      })
+                    }
+                    placeholder="Spotify app client secret"
+                    type="password"
+                    disabled={busy === "spotify-config"}
+                    autoComplete="off"
+                  />
+                </label>
+
+                <div className="settings-actions spotify-connect-actions">
+                  <span className="spotify-connect-action-hint">
+                    Save your credentials before logging in.
+                  </span>
+                  <button
+                    className="secondary-button"
+                    type="submit"
+                    disabled={busy === "spotify-config"}
+                  >
+                    <Settings size={17} aria-hidden="true" />
+                    Save credentials
+                  </button>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    disabled={!status?.configured || busy === "spotify-login"}
+                    onClick={onLogin}
+                  >
+                    {busy === "spotify-login" ? (
+                      <Loader2 className="spin" size={17} aria-hidden="true" />
+                    ) : (
+                      <LogIn size={17} aria-hidden="true" />
+                    )}
+                    Log in to Spotify
+                  </button>
+                </div>
+
+                <p className="spotify-connect-note">
+                  Credentials stay on this device and are only used for Spotify.
+                  CorosLink reads playlists you own or collaborate on, then
+                  matches tracks through YouTube search.
+                </p>
+              </form>
+            </div>
+          </div>
         )}
       </section>
 
