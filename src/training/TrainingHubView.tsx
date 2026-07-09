@@ -18,7 +18,6 @@ import {
   User,
   RefreshCw
 } from "lucide-react";
-import { ActivityBackupPanel } from "./components/ActivityBackupPanel";
 import { ActivityDetailPanel } from "./components/ActivityDetailPanel";
 import { FitnessScoresPanel } from "./components/FitnessScoresPanel";
 import { FitnessTrendPanel } from "./components/FitnessTrendPanel";
@@ -435,7 +434,6 @@ export function TrainingHubView({
             </div>
           </section>
 
-          <ActivityBackupPanel api={api} />
         </>
       ) : null}
     </div>

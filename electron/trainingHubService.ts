@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { safeStorage } from "electron";
 import {
   corosSportName,
@@ -58,6 +60,13 @@ import {
   type PlanWorkoutEntry
 } from "./corosWorkoutBuilder";
 import { TRAINING_HUB_EXPORT_FORMATS } from "./types";
+import { signRequest, sha256Hex } from "./awsSigV4";
+import { createStoreZip } from "./zipStore";
+import {
+  regionFromBaseUrl,
+  stsRequestUrl,
+  decodeStsCredentials
+} from "./corosUploadConfig";
 
 interface LoginResult {
   loginData: TrainingHubLoginData;
@@ -788,6 +797,117 @@ export async function uploadRouteToCorosAccount(
   throw new Error(
     "Uploading routes to your COROS account is not available yet. Export the GPX and import it in the COROS phone app for now."
   );
+}
+
+/**
+ * Upload a local .fit or .tcx activity file to the signed-in COROS account.
+ * Reuses the stored Training Hub session (no separate COROS login).
+ * Flow: STS credentials → zip the file → S3 PUT → POST /activity/fit/import.
+ */
+export async function uploadActivityFitToCoros(
+  fitPath: string
+): Promise<{ importId: string }> {
+  const auth = getStoredAuth();
+  if (!auth) {
+    throw new Error("Not signed in to COROS. Log in to the Training Hub first.");
+  }
+
+  const ext = path.extname(fitPath).toLowerCase().replace(".", "");
+  if (ext !== "fit" && ext !== "tcx") {
+    throw new Error(`Unsupported file type ".${ext}" (only .fit or .tcx).`);
+  }
+
+  const fileBuf = fs.readFileSync(fitPath);
+  const md5 = crypto.createHash("md5").update(fileBuf).digest("hex");
+  const oriFileName = path.basename(fitPath);
+
+  // 1. STS credentials (unauthenticated app-level request).
+  const region = regionFromBaseUrl(auth.baseUrl);
+  const stsResp = await fetch(stsRequestUrl(region));
+  if (!stsResp.ok) {
+    throw new Error(`COROS STS request failed: ${stsResp.status}`);
+  }
+  const stsJson = (await stsResp.json()) as {
+    data?: { credentials?: string };
+  };
+  if (!stsJson.data?.credentials) {
+    throw new Error("COROS STS response missing credentials.");
+  }
+  const sts = decodeStsCredentials(stsJson.data.credentials);
+
+  // 2. Zip the file as <md5>/<oriFileName> and upload to S3.
+  const zipBuf = createStoreZip([
+    { name: `${md5}/${oriFileName}`, data: fileBuf }
+  ]);
+  const objectKey = `fit_zip/${auth.userId}/${md5}.zip`;
+  const host = `${sts.Bucket}.s3.${sts.Region}.amazonaws.com`;
+  const putUrl = `https://${host}/${objectKey}`;
+  const payloadHash = sha256Hex(zipBuf);
+  // Compute the timestamp once so the signed value and the sent header match.
+  const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, "");
+  const { authorization } = signRequest({
+    method: "PUT",
+    url: putUrl,
+    region: sts.Region,
+    service: "s3",
+    accessKeyId: sts.AccessKeyId,
+    secretAccessKey: sts.SecretAccessKey,
+    sessionToken: sts.SessionToken,
+    payloadHash,
+    amzDate,
+    signedHeaders: {
+      host,
+      "x-amz-content-sha256": payloadHash,
+      "x-amz-date": amzDate,
+      "x-amz-security-token": sts.SessionToken
+    }
+  });
+  const putResp = await fetch(putUrl, {
+    method: "PUT",
+    headers: {
+      Host: host,
+      "x-amz-content-sha256": payloadHash,
+      "x-amz-date": amzDate,
+      "x-amz-security-token": sts.SessionToken,
+      Authorization: authorization,
+      "Content-Type": "application/zip"
+    },
+    body: zipBuf
+  });
+  if (!putResp.ok) {
+    throw new Error(`S3 upload failed: ${putResp.status}`);
+  }
+
+  // 3. Register the import with COROS.
+  const body = {
+    source: 1,
+    timezone: (-new Date().getTimezoneOffset() / 60) * 4,
+    bucket: sts.Bucket,
+    md5,
+    size: zipBuf.byteLength,
+    object: objectKey,
+    serviceName: "aws",
+    oriFileName
+  };
+  const form = new FormData();
+  form.append("jsonParameter", JSON.stringify(body));
+  const importResp = await fetch(`${auth.baseUrl}/activity/fit/import`, {
+    method: "POST",
+    headers: buildTrainingHubHeaders(auth.accessToken, auth.userId),
+    body: form
+  });
+  if (!importResp.ok) {
+    throw new Error(`COROS import failed: ${importResp.status}`);
+  }
+  const importJson = (await importResp.json()) as {
+    result?: string;
+    message?: string;
+    data?: { importId?: string | number };
+  };
+  if (importJson.result && importJson.result !== "0000") {
+    throw new Error(`COROS import rejected: ${importJson.message ?? "unknown"}`);
+  }
+  return { importId: String(importJson.data?.importId ?? "") };
 }
 
 export async function createWorkoutProgram(

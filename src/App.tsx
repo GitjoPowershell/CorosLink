@@ -90,6 +90,7 @@ import {
 import { MapsView } from "./maps/MapsView";
 import { SettingsView } from "./settings/SettingsView";
 import { CalendarView } from "./calendar/CalendarView";
+import { DataView } from "./data/DataView";
 import { ChatView } from "./chat/ChatView";
 import {
   LibrarySyncLayout,
@@ -1686,6 +1687,13 @@ export default function App() {
                 onRefresh={handleTrainingHubRefresh}
                 onLoadDetail={handleTrainingHubActivityDetail}
                 onExportFile={handleTrainingHubExport}
+              />
+            ) : null}
+            {activeView === "data" ? (
+              <DataView
+                api={api}
+                status={trainingHubStatus}
+                onOpenTraining={() => setActiveView("training")}
               />
             ) : null}
             {activeView === "settings" ? (

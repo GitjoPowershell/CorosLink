@@ -1373,3 +1373,31 @@ export type PersistedChatEntry =
   | { kind: "activityHrTrend"; preview: ActivityHrTrendPreview }
   | { kind: "fitnessTrend"; preview: FitnessTrendPreview }
   | { kind: "hrZoneSummary"; preview: HrZonePreview };
+
+export interface IntervalsStatus {
+  connected: boolean;
+  athleteId?: string;
+}
+
+export interface IntervalsActivity {
+  intervalsId: string;
+  name: string;
+  startEpochMs: number;
+  movingSec: number;
+  distanceM: number;
+  type: string;
+  fileExt: "fit" | "tcx" | "unknown";
+}
+
+export interface IntervalsActivityWithStatus extends IntervalsActivity {
+  onCoros: boolean;
+}
+
+export interface ManualActivityInput {
+  sport: "run" | "bike" | "other";
+  startTimeIso: string;
+  durationSec: number;
+  distanceM: number;
+  calories?: number;
+  avgHr?: number;
+}

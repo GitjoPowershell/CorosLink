@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { deleteDownload, getDownloadById, initializeDatabase, listDownloads, markDownloadTransferred, clearDownloadTransferredByFileName } from "./database";
 import { downloadAudio, getBinaryStatus } from "./downloadService";
@@ -50,8 +51,21 @@ import {
   loginTrainingHub,
   logoutTrainingHub,
   reconnectTrainingHub,
+  uploadActivityFitToCoros,
   uploadTrainingPlan
 } from "./trainingHubService";
+import {
+  getIntervalsStatus,
+  connectIntervals,
+  disconnectIntervals,
+  listIntervalsActivities,
+  downloadIntervalsFit,
+  recordIntervalsImport,
+  getRecentlyImportedIds,
+  RECENT_IMPORT_WINDOW_MS
+} from "./intervalsService";
+import { isAlreadyOnCoros } from "./intervalsMatch";
+import { buildManualTcx } from "./tcxBuilder";
 import {
   cancelCorosMapDownload,
   cancelCorosMapInstall,
@@ -100,7 +114,9 @@ import type {
   TrainingHubActivityFileType,
   TrainingHubExportResult,
   WatchConnectionSmokeOptionId,
-  YouTubeMusicConfig
+  YouTubeMusicConfig,
+  IntervalsActivityWithStatus,
+  ManualActivityInput
 } from "./types";
 import {
   deleteWatchTrack,
@@ -245,6 +261,13 @@ function sanitizeExportFileName(name?: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 120);
+}
+
+function formatYyyymmddDay(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
 }
 
 function pickLatestTrainingHubActivity(
@@ -905,6 +928,137 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle("trainingHub:getDailyHealthData", (_event, days?: number) =>
     getTrainingDailyHealthData(mainWindow, days ?? 1)
+  );
+
+  ipcMain.handle("intervals:getStatus", () => getIntervalsStatus());
+
+  ipcMain.handle("intervals:connect", (_event, apiKey: string, athleteId: string) =>
+    connectIntervals(apiKey, athleteId)
+  );
+
+  ipcMain.handle("intervals:disconnect", () => disconnectIntervals());
+
+  ipcMain.handle(
+    "intervals:listMissing",
+    async (_event, daysBack: number): Promise<IntervalsActivityWithStatus[]> => {
+      const intervals = await listIntervalsActivities(daysBack);
+      // Pull enough COROS activities to cover the SAME daysBack window used for
+      // the intervals.icu query, not just the newest 200 — otherwise older
+      // activities fall outside the compare set and are falsely reported as
+      // "Missing". listTrainingHubActivities filters on startDay/endDay
+      // (YYYYMMDD) and pages at `size` per call with no total count, so we
+      // page through the window until a short page signals the end.
+      // listIntervalsActivities computes its from/to bound in UTC
+      // (toISOString), while formatYyyymmddDay/formatScheduleDay use local
+      // calendar days (matching the COROS endpoint's convention). Pad the
+      // COROS window by one extra day on each side so local/UTC boundary
+      // drift can only widen the compare set (superset), never narrow it —
+      // a superset can't cause a false "Missing".
+      const toDay = formatYyyymmddDay(new Date(Date.now() + 86_400_000));
+      const fromDay = formatYyyymmddDay(
+        new Date(Date.now() - (daysBack + 1) * 86_400_000)
+      );
+      const corosRaw: TrainingHubActivity[] = [];
+      const INTERVALS_MATCH_PAGE_SIZE = 100;
+      const INTERVALS_MATCH_MAX_PAGES = 50;
+      for (let page = 1; page <= INTERVALS_MATCH_MAX_PAGES; page += 1) {
+        const pageActivities = await listTrainingHubActivities(
+          page,
+          INTERVALS_MATCH_PAGE_SIZE,
+          fromDay,
+          toDay
+        );
+        corosRaw.push(...pageActivities);
+        if (pageActivities.length < INTERVALS_MATCH_PAGE_SIZE) {
+          break;
+        }
+      }
+      const coros = corosRaw.map((a) => ({
+        startEpochMs: (a.startTime ?? 0) * 1000,
+        movingSec: a.duration ?? 0,
+        distanceM: a.distance ?? 0
+      }));
+      const recentlyImported = getRecentlyImportedIds(RECENT_IMPORT_WINDOW_MS);
+      return intervals.map((a) => ({
+        ...a,
+        onCoros:
+          isAlreadyOnCoros(
+            {
+              startEpochMs: a.startEpochMs,
+              movingSec: a.movingSec,
+              distanceM: a.distanceM
+            },
+            coros
+          ) || recentlyImported.has(a.intervalsId)
+      }));
+    }
+  );
+
+  ipcMain.handle(
+    "intervals:import",
+    async (
+      _event,
+      intervalsId: string,
+      fileExt: "fit" | "tcx" | "unknown"
+    ): Promise<{ importId: string }> => {
+      const tmpExt = fileExt === "tcx" ? "tcx" : "fit";
+      const tmp = path.join(
+        os.tmpdir(),
+        `coroslink-intervals-${intervalsId}.${tmpExt}`
+      );
+      try {
+        await downloadIntervalsFit(intervalsId, tmp);
+        const result = await uploadActivityFitToCoros(tmp);
+        recordIntervalsImport(intervalsId);
+        return result;
+      } finally {
+        try {
+          fs.rmSync(tmp);
+        } catch {
+          /* best effort */
+        }
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "coros:addManualActivity",
+    async (_event, input: ManualActivityInput): Promise<{ importId: string }> => {
+      if (!Number.isFinite(input.durationSec) || !(input.durationSec > 0)) {
+        throw new Error("Duration must be a finite number greater than 0.");
+      }
+      if (Number.isNaN(Date.parse(input.startTimeIso))) {
+        throw new Error("Invalid start time.");
+      }
+      const toFiniteNonNegative = (value: unknown): number => {
+        const n = Number(value);
+        return Number.isFinite(n) && n > 0 ? n : 0;
+      };
+      const sanitized: ManualActivityInput = {
+        ...input,
+        distanceM: toFiniteNonNegative(input.distanceM),
+        calories: toFiniteNonNegative(input.calories),
+        avgHr:
+          input.avgHr != null && Number.isFinite(Number(input.avgHr)) && Number(input.avgHr) > 0
+            ? Number(input.avgHr)
+            : undefined
+      };
+      const tcx = buildManualTcx(sanitized);
+      const tmp = path.join(
+        os.tmpdir(),
+        `coroslink-manual-${Date.now()}.tcx`
+      );
+      fs.writeFileSync(tmp, tcx, "utf8");
+      try {
+        return await uploadActivityFitToCoros(tmp);
+      } finally {
+        try {
+          fs.rmSync(tmp);
+        } catch {
+          /* best effort */
+        }
+      }
+    }
   );
 
   ipcMain.handle("maps:getCorosManifest", () => getCorosMapManifest());
