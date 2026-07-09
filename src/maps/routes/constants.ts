@@ -7,6 +7,7 @@ import type {
 export type RouteBaseLayer =
   | "street"
   | "outdoors"
+  | "light"
   | "dark"
   | "topo"
   | "satellite";
@@ -42,8 +43,17 @@ export const ROUTE_BASE_LAYERS: Record<RouteBaseLayer, TileLayerConfig> = {
     attribution:
       '&copy; <a href="https://www.cyclosm.org">CyclOSM</a>, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   },
+  light: {
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    maxZoom: 20,
+    subdomains: "abcd",
+    label: "Light",
+    description: "Clean minimal map",
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  },
   dark: {
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
     maxZoom: 20,
     subdomains: "abcd",
     label: "Dark",
@@ -75,6 +85,7 @@ export const ROUTE_BASE_LAYER_ORDER: RouteBaseLayer[] = [
   "outdoors",
   "topo",
   "satellite",
+  "light",
   "dark"
 ];
 

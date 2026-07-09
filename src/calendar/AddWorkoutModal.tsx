@@ -332,24 +332,44 @@ export function AddWorkoutModal({
       });
   }, [sportTypes]);
 
-  const allActivitySportOptions = useMemo(
-    () => [...SUGGESTED_LOG_SPORT_OPTIONS, ...corosSportOptions],
-    [corosSportOptions]
-  );
+  // One catalog: curated options first (stable defaults), then every COROS
+  // sport type that doesn't duplicate a curated label.
+  const combinedSportOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const combined: LogSportOption[] = [];
+    for (const option of [...SUGGESTED_LOG_SPORT_OPTIONS, ...corosSportOptions]) {
+      const key = normalizeSportLabel(option.label);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      combined.push(option);
+    }
+    return combined;
+  }, [corosSportOptions]);
 
   const selectedActivitySport =
-    allActivitySportOptions.find((option) => option.id === activitySportId) ??
+    combinedSportOptions.find((option) => option.id === activitySportId) ??
     DEFAULT_LOG_SPORT_OPTION;
 
-  const filteredCorosSportOptions = useMemo(() => {
+  const visibleSportOptions = useMemo(() => {
     const query = normalizeSportLabel(activitySportSearch);
-    const matches = query
-      ? corosSportOptions.filter((option) =>
-          normalizeSportLabel(option.label).includes(query)
-        )
-      : corosSportOptions;
-    return matches.slice(0, query ? 12 : 8);
-  }, [activitySportSearch, corosSportOptions]);
+    if (query) {
+      return combinedSportOptions
+        .filter((option) => normalizeSportLabel(option.label).includes(query))
+        .slice(0, 12);
+    }
+
+    const defaults = combinedSportOptions.slice(
+      0,
+      SUGGESTED_LOG_SPORT_OPTIONS.length
+    );
+    // Keep a selection made through search visible after the query is cleared.
+    if (!defaults.some((option) => option.id === selectedActivitySport.id)) {
+      return [selectedActivitySport, ...defaults];
+    }
+    return defaults;
+  }, [activitySportSearch, combinedSportOptions, selectedActivitySport]);
 
   const showActivityDistance = selectedActivitySport.distanceUnit !== "none";
   const activityDistanceLabel =
@@ -769,69 +789,40 @@ export function AddWorkoutModal({
                 role="group"
                 aria-label="Activity type"
               >
-                <div className="calendar-sport-grid">
-                  {SUGGESTED_LOG_SPORT_OPTIONS.map((option) => {
-                    const Icon = option.Icon;
-                    return (
-                      <button
-                        key={option.id}
-                        type="button"
-                        aria-pressed={selectedActivitySport.id === option.id}
-                        className={`calendar-sport-card ${selectedActivitySport.id === option.id ? "is-active" : ""}`}
-                        onClick={() => setActivitySportId(option.id)}
-                        disabled={submitting}
-                      >
-                        <Icon size={17} aria-hidden="true" />
-                        <span>{option.label}</span>
-                        <small>{describeLogSportOption(option)}</small>
-                      </button>
-                    );
-                  })}
-                </div>
-
                 <label className="calendar-field calendar-sport-search">
-                  <span>More activity types</span>
+                  <span>Activity type</span>
                   <span className="calendar-sport-search-control">
                     <Search size={14} aria-hidden="true" />
                     <input
                       type="text"
                       value={activitySportSearch}
                       onChange={(event) => setActivitySportSearch(event.target.value)}
-                      placeholder={
-                        corosSportOptions.length > 0
-                          ? "Search COROS sports"
-                          : "COROS sports unavailable"
-                      }
-                      disabled={submitting || corosSportOptions.length === 0}
+                      placeholder="Search activity types"
+                      disabled={submitting}
                     />
                   </span>
                 </label>
 
-                {corosSportOptions.length === 0 ? (
+                {visibleSportOptions.length === 0 ? (
                   <p className="calendar-activity-hint">
-                    Suggested activity types are available. COROS sport types
-                    could not be loaded.
-                  </p>
-                ) : filteredCorosSportOptions.length === 0 ? (
-                  <p className="calendar-activity-hint">
-                    No COROS activity types match that search.
+                    No activity types match that search.
                   </p>
                 ) : (
-                  <div className="calendar-sport-results">
-                    {filteredCorosSportOptions.map((option) => {
+                  <div className="calendar-sport-grid">
+                    {visibleSportOptions.map((option) => {
                       const Icon = option.Icon;
                       return (
                         <button
                           key={option.id}
                           type="button"
                           aria-pressed={selectedActivitySport.id === option.id}
-                          className={`calendar-sport-result ${selectedActivitySport.id === option.id ? "is-active" : ""}`}
+                          className={`calendar-sport-card ${selectedActivitySport.id === option.id ? "is-active" : ""}`}
                           onClick={() => setActivitySportId(option.id)}
                           disabled={submitting}
+                          title={describeLogSportOption(option)}
                         >
-                          <Icon size={15} aria-hidden="true" />
+                          <Icon size={14} aria-hidden="true" />
                           <span>{option.label}</span>
-                          <small>{describeLogSportOption(option)}</small>
                         </button>
                       );
                     })}

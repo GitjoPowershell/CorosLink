@@ -39,10 +39,15 @@ export type WatchModelId =
   | "pace-pro"
   | "pace-4"
   | "pace-3"
+  | "pace-2"
   | "nomad"
   | "vertix-2"
   | "vertix-2s"
-  | "apex-2-pro";
+  | "apex-4"
+  | "apex-2-pro"
+  | "apex-2"
+  | "apex-pro"
+  | "apex";
 
 export type WatchConnectionSmokeOptionId =
   | "auto"
@@ -50,9 +55,15 @@ export type WatchConnectionSmokeOptionId =
   | "pace-pro"
   | "pace-4"
   | "pace-3"
+  | "pace-2"
   | "nomad"
   | "vertix-2"
   | "vertix-2s"
+  | "apex-4"
+  | "apex-2-pro"
+  | "apex-2"
+  | "apex-pro"
+  | "apex"
   | "unknown-pace"
   | "installer";
 

@@ -41,23 +41,25 @@ export function CalendarGrid({
         </div>
       </div>
 
-      {weeks.map((week) => (
-        <div key={week.key} className="calendar-grid-row">
-          {week.days.map((day) => (
-            <DayCell
-              key={day.dateKey}
-              day={day}
-              mode={mode}
-              busy={busy}
-              onSelectScheduled={(entry) => onSelectScheduled(day, entry)}
-              onSelectActivity={(activity) => onSelectActivity(day, activity)}
-              onAdd={onAdd}
-              onDropEntry={onDropEntry}
-            />
-          ))}
-          <WeekStatsCell stats={week.stats} onAskCoach={() => onAskCoachWeek(week)} />
-        </div>
-      ))}
+      <div className="calendar-grid-body">
+        {weeks.map((week) => (
+          <div key={week.key} className="calendar-grid-row">
+            {week.days.map((day) => (
+              <DayCell
+                key={day.dateKey}
+                day={day}
+                mode={mode}
+                busy={busy}
+                onSelectScheduled={(entry) => onSelectScheduled(day, entry)}
+                onSelectActivity={(activity) => onSelectActivity(day, activity)}
+                onAdd={onAdd}
+                onDropEntry={onDropEntry}
+              />
+            ))}
+            <WeekStatsCell stats={week.stats} onAskCoach={() => onAskCoachWeek(week)} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

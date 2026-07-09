@@ -52,6 +52,12 @@ const WATCH_CONNECTION_SMOKE_FIXTURES: Record<
     trackNames: ["Cooldown.mp3"],
     totalBytes: fallbackBytesForModel("pace-3")
   },
+  "pace-2": {
+    volumeName: "COROS PACE 2",
+    createMusicFolder: true,
+    trackNames: ["Interval Mix.mp3"],
+    totalBytes: fallbackBytesForModel("pace-2")
+  },
   nomad: {
     volumeName: "COROS NOMAD",
     createMusicFolder: true,
@@ -72,6 +78,40 @@ const WATCH_CONNECTION_SMOKE_FIXTURES: Record<
     createMapFolder: true,
     trackNames: ["Ridge Mix.mp3"],
     totalBytes: fallbackBytesForModel("vertix-2s")
+  },
+  "apex-4": {
+    volumeName: "COROS APEX 4",
+    createMusicFolder: true,
+    createMapFolder: true,
+    trackNames: ["Alpine Mix.mp3"],
+    totalBytes: fallbackBytesForModel("apex-4")
+  },
+  "apex-2-pro": {
+    volumeName: "COROS APEX 2 PRO",
+    createMusicFolder: true,
+    createMapFolder: true,
+    trackNames: ["Summit Mix.mp3"],
+    totalBytes: fallbackBytesForModel("apex-2-pro")
+  },
+  "apex-2": {
+    volumeName: "COROS APEX 2",
+    createMusicFolder: true,
+    createMapFolder: true,
+    trackNames: ["Ridge Mix.mp3"],
+    totalBytes: fallbackBytesForModel("apex-2")
+  },
+  "apex-pro": {
+    volumeName: "COROS APEX PRO",
+    createMusicFolder: true,
+    createMapFolder: true,
+    trackNames: ["Trail Mix.mp3"],
+    totalBytes: fallbackBytesForModel("apex-pro")
+  },
+  apex: {
+    volumeName: "COROS APEX",
+    createMusicFolder: true,
+    trackNames: ["Classic Mix.mp3"],
+    totalBytes: fallbackBytesForModel("apex")
   },
   "unknown-pace": {
     volumeName: "COROS PACE",

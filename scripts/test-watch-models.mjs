@@ -37,8 +37,26 @@ const nameCases = [
   ["COROS VERTIX 2S", "vertix-2s"],
   ["COROS APEX 2 PRO", "apex-2-pro"],
   ["APEX 2 PRO", "apex-2-pro"],
+  ["COROS APEX 4", "apex-4"],
+  ["APEX 4", "apex-4"],
+  ["APEX4", "apex-4"],
+  ["APEX-4", "apex-4"],
+  ["COROS APEX 2", "apex-2"],
+  ["APEX 2", "apex-2"],
+  ["APEX2", "apex-2"],
+  ["APEX-2", "apex-2"],
+  ["COROS APEX PRO", "apex-pro"],
+  ["APEX PRO", "apex-pro"],
+  ["COROS APEX", "apex"],
+  ["APEX", "apex"],
+  ["COROS PACE 2", "pace-2"],
+  ["PACE 2", "pace-2"],
+  ["PACE2", "pace-2"],
+  ["PACE-2", "pace-2"],
   ["COROS PACE", undefined],
   ["PACE", undefined],
+  ["PACE 20", undefined],
+  ["APEX 20", undefined],
   ["PACE 30", undefined],
 ];
 
@@ -53,6 +71,8 @@ for (const [name, expected] of nameCases) {
 assert.equal(normalizeVolumeName("  coros pace-3  "), "PACE 3");
 assert.equal(normalizeVolumeName("PACE3"), "PACE 3");
 assert.equal(normalizeVolumeName("coros nomad"), "NOMAD");
+assert.equal(normalizeVolumeName("APEX2"), "APEX 2");
+assert.equal(normalizeVolumeName("  coros apex-2  "), "APEX 2");
 
 assert.equal(resolveWatchModel("COROS PACE", FOUR_GB), undefined);
 assert.equal(resolveWatchModel("UNKNOWN", FOUR_GB), undefined);

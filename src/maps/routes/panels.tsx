@@ -511,10 +511,14 @@ export function ExplorePanel({
 /** Floating base-map switcher (bottom-right of the map). */
 export function MapLayerControl({
   value,
-  onChange
+  onChange,
+  overlays,
+  onToggleOverlay
 }: {
   value: RouteBaseLayer;
   onChange: (layer: RouteBaseLayer) => void;
+  overlays?: RouteOverlayId[];
+  onToggleOverlay?: (overlay: RouteOverlayId) => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -549,6 +553,36 @@ export function MapLayerControl({
               </button>
             );
           })}
+          {overlays && onToggleOverlay && (
+            <>
+              <div className="route-basemap-divider" />
+              <div className="route-basemap-head">
+                <span>Trail overlays</span>
+              </div>
+              {ROUTE_OVERLAY_ORDER.map((id) => {
+                const config = ROUTE_OVERLAY_LAYERS[id];
+                const active = overlays.includes(id);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`route-basemap-option${active ? " is-active" : ""}`}
+                    onClick={() => onToggleOverlay(id)}
+                  >
+                    <strong>
+                      <span
+                        className="route-basemap-swatch"
+                        style={{ background: config.swatch }}
+                        aria-hidden="true"
+                      />
+                      {config.label}
+                    </strong>
+                    <em>{config.description}</em>
+                  </button>
+                );
+              })}
+            </>
+          )}
         </div>
       ) : (
         <button

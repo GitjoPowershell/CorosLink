@@ -110,7 +110,7 @@ function PairChip({
   return (
     <button
       type="button"
-      className={`calendar-chip calendar-chip-planned ${categoryClass(scheduled.name)} ${missed ? "is-unfulfilled" : ""}`}
+      className={`calendar-chip calendar-chip-planned ${categoryClass(scheduled.name)}`}
       draggable={!day.isPast}
       onDragStart={(event) => {
         const payload: CalendarDragPayload = {
