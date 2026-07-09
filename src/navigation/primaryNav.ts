@@ -6,6 +6,7 @@ import {
   Map as MapIcon,
   MessageCircle,
   Music,
+  Settings,
   type LucideIcon,
 } from "lucide-react";
 
@@ -16,7 +17,8 @@ export type PrimaryView =
   | "data"
   | "calendar"
   | "maps"
-  | "coach";
+  | "coach"
+  | "settings";
 
 export interface PrimaryNavItem {
   id: PrimaryView;
@@ -24,6 +26,8 @@ export interface PrimaryNavItem {
   icon: LucideIcon;
   beta?: boolean;
   showActivity?: boolean;
+  /** Hidden from the startup-view picker (e.g. Settings). */
+  excludeFromStartup?: boolean;
 }
 
 export const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
@@ -39,6 +43,12 @@ export const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     icon: MessageCircle,
     beta: true,
     showActivity: true,
+  },
+  {
+    id: "settings",
+    label: "Settings",
+    icon: Settings,
+    excludeFromStartup: true,
   },
 ];
 

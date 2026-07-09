@@ -47,6 +47,7 @@ import type {
   TrainingHubLibraryWorkout,
   PlanWorkoutEntryInput,
   TransferResult,
+  AppInfo,
   AppUpdateSnapshot,
   WatchConnectionSmokeOptionId,
   WatchStatus,
@@ -299,6 +300,8 @@ export interface CorosLinkApi {
   startRouteShare: (id: string) => Promise<RouteShareSession>;
   stopRouteShare: () => Promise<void>;
   validateRouteApiKey: (apiKey: string) => Promise<RouteApiKeyValidation>;
+  getAppInfo: () => Promise<AppInfo>;
+  openAppStorageLocation: (id: string) => Promise<void>;
   getAppUpdateStatus: () => Promise<AppUpdateSnapshot>;
   checkForAppUpdates: () => Promise<AppUpdateSnapshot>;
   downloadAppUpdate: () => Promise<AppUpdateSnapshot>;

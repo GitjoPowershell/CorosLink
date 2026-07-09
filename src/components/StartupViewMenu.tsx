@@ -55,7 +55,9 @@ export function StartupViewMenu({ value, onChange }: StartupViewMenuProps) {
         <div className="startup-view-popover" role="menu">
           <p className="update-settings-heading">Startup view</p>
           <div className="startup-view-options">
-            {PRIMARY_NAV_ITEMS.map(({ id, label, icon: Icon, beta }) => {
+            {PRIMARY_NAV_ITEMS.filter(
+              (item) => !item.excludeFromStartup,
+            ).map(({ id, label, icon: Icon, beta }) => {
               const active = id === value;
 
               return (

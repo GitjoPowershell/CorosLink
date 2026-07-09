@@ -48,6 +48,7 @@ import type {
   TrainingHubLibraryWorkout,
   PlanWorkoutEntryInput,
   TransferResult,
+  AppInfo,
   AppUpdateSnapshot,
   WatchConnectionSmokeOptionId,
   WatchStatus,
@@ -493,6 +494,9 @@ const api = {
     ipcRenderer.invoke("maps:stopRouteShare"),
   validateRouteApiKey: (apiKey: string): Promise<RouteApiKeyValidation> =>
     ipcRenderer.invoke("maps:validateRouteApiKey", apiKey),
+  getAppInfo: (): Promise<AppInfo> => ipcRenderer.invoke("app:getInfo"),
+  openAppStorageLocation: (id: string): Promise<void> =>
+    ipcRenderer.invoke("app:openStorageLocation", id),
   getAppUpdateStatus: (): Promise<AppUpdateSnapshot> =>
     ipcRenderer.invoke("app:getUpdateStatus"),
   checkForAppUpdates: (): Promise<AppUpdateSnapshot> =>

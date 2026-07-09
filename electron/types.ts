@@ -798,6 +798,7 @@ export interface TrainingHubActivityDetail {
   activityId?: string;
   name?: string;
   sportType?: number;
+  sportName?: string;
   startTime?: number;
   duration?: number;
   distance?: number;
@@ -959,6 +960,28 @@ export interface AppUpdateSnapshot {
   autoCheck: boolean;
   /** When false, available updates are not downloaded until the user asks. */
   autoDownload: boolean;
+}
+
+export interface AppStorageLocation {
+  id: string;
+  label: string;
+  description: string;
+  path: string;
+  kind: "directory" | "file";
+  exists: boolean;
+  /** Null when the location does not exist or its size could not be read. */
+  sizeBytes: number | null;
+}
+
+export interface AppInfo {
+  version: string;
+  electronVersion: string;
+  chromeVersion: string;
+  nodeVersion: string;
+  platform: string;
+  arch: string;
+  userDataPath: string;
+  storageLocations: AppStorageLocation[];
 }
 
 // ----- Training Coach chatbot -----

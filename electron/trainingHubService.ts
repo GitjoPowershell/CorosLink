@@ -3,6 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { safeStorage } from "electron";
 import {
+  corosSportName,
+  enrichActivitiesWithSportNames,
+  mergeSportTypeEntries
+} from "./corosSportTypes";
+import {
   deleteSettings,
   getSetting,
   listStoredTrainingActivities,
@@ -137,6 +142,8 @@ interface RawTrainingHubActivity {
   activityId?: string;
   name?: string;
   sportType?: number;
+  sportName?: string;
+  sport_name?: string;
   startTime?: number;
   endTime?: number;
   totalTime?: number;
@@ -423,7 +430,9 @@ export async function listTrainingHubActivities(
     params
   );
 
-  const activities = (data.dataList ?? []).map(mapTrainingHubActivity);
+  const activities = enrichActivitiesWithSportNames(
+    (data.dataList ?? []).map(mapTrainingHubActivity)
+  );
   // Persist a local copy so analytics (e.g. personal pace) work offline and
   // across sessions without re-fetching from COROS.
   try {
@@ -455,6 +464,17 @@ export async function getTrainingHubActivityDetail(
   let detail = parseActivityDetail(raw);
   if (listActivity) {
     detail = mergeActivityDetailWithList(detail, listActivity);
+  }
+
+  const sportName = corosSportName(
+    detail.sportType ?? listActivity?.sportType ?? 0,
+    detail.sportName ?? listActivity?.sportName
+  );
+  if (sportName) {
+    detail = {
+      ...detail,
+      sportName
+    };
   }
 
   const gpsPointCount =
@@ -585,14 +605,16 @@ export async function getSportTypeMap(): Promise<TrainingHubSportType[]> {
     );
     const list = data.sportList ?? data.dataList ?? [];
 
-    return list
+    const fromApi = list
       .map((item) => ({
         sportType: item.sportType ?? 0,
-        sportName: item.sportName ?? item.name ?? `Sport ${item.sportType ?? 0}`
+        sportName: item.sportName ?? item.name ?? ""
       }))
-      .filter((item) => item.sportType > 0);
+      .filter((item) => item.sportType > 0 && item.sportName.trim());
+
+    return mergeSportTypeEntries(fromApi);
   } catch {
-    return [];
+    return mergeSportTypeEntries([]);
   }
 }
 
@@ -1753,6 +1775,7 @@ function mapTrainingHubActivity(
     activityId,
     name: raw.name,
     sportType: raw.sportType ?? 0,
+    sportName: raw.sportName ?? raw.sport_name,
     startTime: raw.startTime,
     endTime: raw.endTime,
     duration: raw.totalTime,
@@ -4066,6 +4089,13 @@ export function mergeActivityDetailWithList(
     activityId: detail.activityId ?? listActivity.activityId,
     name: detail.name ?? listActivity.name,
     sportType: detail.sportType ?? listActivity.sportType,
+    sportName:
+      detail.sportName ??
+      listActivity.sportName ??
+      corosSportName(
+        detail.sportType ?? listActivity.sportType,
+        undefined
+      ),
     startTime: detail.startTime ?? listActivity.startTime,
     duration: coalesceActivityMetric(detail.duration, listActivity.duration),
     distance: coalesceActivityMetric(detail.distance, listActivity.distance),
@@ -4108,6 +4138,9 @@ export function parseActivityDetail(raw: Record<string, unknown>): TrainingHubAc
     name: pickString(raw, ["name"]) ?? pickString(summary, ["name"]),
     sportType:
       toOptionalNumber(raw.sportType) ?? toOptionalNumber(summary.sportType),
+    sportName:
+      pickString(raw, ["sportName", "sport_name"]) ??
+      pickString(summary, ["sportName", "sport_name", "modeName"]),
     startTime:
       toOptionalNumber(raw.startTime) ??
       toOptionalNumber(summary.startTime) ??

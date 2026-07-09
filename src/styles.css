@@ -5226,6 +5226,7 @@ td span {
 }
 
 .training-status-dot {
+  position: relative;
   width: 9px;
   height: 9px;
   border-radius: 50%;
@@ -5235,7 +5236,18 @@ td span {
 
 .training-status-dot.is-connected {
   background: var(--success-dot);
-  box-shadow: 0 0 0 5px rgba(52, 211, 153, 0.14);
+  box-shadow: none;
+}
+
+/* Halo lives on a pseudo-element animated with transform/opacity only, so the
+   pulse stays on the compositor instead of repainting box-shadow each frame. */
+.training-status-dot.is-connected::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  background: rgba(52, 211, 153, 0.14);
+  z-index: -1;
   animation: training-status-pulse 2.8s ease-in-out infinite;
 }
 
@@ -5686,6 +5698,227 @@ td span {
 
 .spotify-account-panel {
   padding: 18px 20px;
+}
+
+.spotify-connect {
+  display: grid;
+  max-width: 1240px;
+  gap: 22px;
+}
+
+.spotify-connect-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.spotify-connect-header .badge {
+  margin-left: auto;
+  align-self: flex-start;
+}
+
+.spotify-connect-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.8fr) minmax(420px, 1.2fr);
+  align-items: start;
+  gap: 28px;
+}
+
+.spotify-connect-guide {
+  min-width: 0;
+  padding: 4px 28px 4px 0;
+  border-right: 1px solid var(--glass-border);
+}
+
+.spotify-connect-guide-heading {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 22px;
+}
+
+.spotify-connect-guide-heading h3,
+.spotify-credentials-heading h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.spotify-connect-guide-heading p,
+.spotify-credentials-heading span {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.spotify-connect-steps {
+  counter-reset: spotify-connect-step;
+  display: grid;
+  gap: 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.spotify-connect-steps li {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  min-height: 54px;
+  padding-left: 42px;
+  counter-increment: spotify-connect-step;
+}
+
+.spotify-connect-steps li::before {
+  content: counter(spotify-connect-step);
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid rgba(30, 215, 96, 0.45);
+  border-radius: 50%;
+  background: rgba(30, 215, 96, 0.14);
+  color: #1ed760;
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.spotify-connect-steps li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 35px;
+  bottom: -20px;
+  left: 14px;
+  width: 1px;
+  background: var(--glass-border);
+}
+
+.spotify-connect-step-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.spotify-connect-step-copy strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.spotify-connect-step-copy span {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.spotify-dashboard-link {
+  display: inline-flex;
+  align-items: center;
+  align-self: start;
+  gap: 6px;
+  color: #1ed760;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.spotify-dashboard-link:hover {
+  color: var(--success-text);
+  text-decoration: underline;
+}
+
+.spotify-connect-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-inset);
+}
+
+.spotify-credentials-heading,
+.spotify-redirect-field,
+.spotify-connect-actions,
+.spotify-connect-note {
+  grid-column: 1 / -1;
+}
+
+.spotify-credentials-heading {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.spotify-redirect-field {
+  min-width: 0;
+}
+
+.spotify-redirect-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.spotify-redirect-row input {
+  min-width: 0;
+}
+
+.spotify-redirect-row .secondary-button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.spotify-redirect-field small {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.spotify-connect-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.spotify-connect-actions .secondary-button,
+.spotify-connect-actions .primary-button {
+  white-space: nowrap;
+}
+
+.spotify-connect-action-hint {
+  flex: 1;
+  min-width: 180px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.spotify-connect-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 
 .stack.stack-fill > .music-connect-panel {
@@ -8809,9 +9042,22 @@ td span {
 }
 
 .training-heatmap-grid.is-ready .training-heatmap-cell.is-peak {
-  animation:
-    heatmap-cell-pop 0.6s cubic-bezier(0.34, 1.45, 0.64, 1) both,
-    heatmap-peak-glow 2.8s ease-in-out 1.1s infinite;
+  animation: heatmap-cell-pop 0.6s cubic-bezier(0.34, 1.45, 0.64, 1) both;
+}
+
+/* Peak glow pulses via opacity on a pseudo-element with a static box-shadow,
+   keeping the animation on the compositor instead of repainting each frame. */
+.training-heatmap-grid.is-ready .training-heatmap-cell.is-peak::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    0 0 22px rgba(45, 154, 116, 0.55),
+    0 0 36px rgba(45, 154, 116, 0.2);
+  opacity: 0;
+  pointer-events: none;
+  animation: heatmap-peak-glow 2.8s ease-in-out 1.1s infinite;
 }
 
 .training-heatmap-cell.is-empty {
@@ -8998,13 +9244,11 @@ td span {
 @keyframes heatmap-peak-glow {
   0%,
   100% {
-    box-shadow: 0 0 14px rgba(45, 154, 116, 0.35);
+    opacity: 0;
   }
 
   50% {
-    box-shadow:
-      0 0 22px rgba(45, 154, 116, 0.55),
-      0 0 36px rgba(45, 154, 116, 0.2);
+    opacity: 1;
   }
 }
 
@@ -11065,6 +11309,7 @@ tr.data-intervals-row-missing {
   mix-blend-mode: screen;
   pointer-events: none;
   z-index: 0;
+  will-change: transform, opacity;
   animation: banner-glow 9s ease-in-out infinite;
 }
 
@@ -11955,11 +12200,13 @@ tr.data-intervals-row-missing {
 @keyframes training-status-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 5px rgba(52, 211, 153, 0.14);
+    transform: scale(1);
+    opacity: 1;
   }
 
   50% {
-    box-shadow: 0 0 0 8px rgba(52, 211, 153, 0.06);
+    transform: scale(1.32);
+    opacity: 0.42;
   }
 }
 
@@ -13163,6 +13410,40 @@ tr.data-intervals-row-missing {
     justify-content: center;
   }
 
+  .spotify-connect-layout {
+    grid-template-columns: 1fr;
+    gap: 22px;
+  }
+
+  .spotify-connect-guide {
+    padding: 0 0 22px;
+    border-right: 0;
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  .spotify-connect-form {
+    grid-template-columns: 1fr;
+  }
+
+  .spotify-redirect-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .spotify-redirect-row .secondary-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .spotify-connect-actions {
+    width: 100%;
+  }
+
+  .spotify-connect-actions .secondary-button,
+  .spotify-connect-actions .primary-button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
   .youtube-downloads-panel {
     max-height: min(280px, 32vh);
   }
@@ -13279,6 +13560,36 @@ tr.data-intervals-row-missing {
 }
 
 @media (max-width: 560px) {
+  .spotify-connect-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .spotify-connect-header .badge {
+    margin-left: 0;
+  }
+
+  .spotify-connect-form {
+    padding: 14px;
+  }
+
+  .spotify-connect-steps li {
+    grid-template-columns: 1fr;
+  }
+
+  .spotify-dashboard-link {
+    width: fit-content;
+    margin-top: 2px;
+  }
+
+  .spotify-connect-actions {
+    align-items: stretch;
+  }
+
+  .spotify-connect-action-hint {
+    flex-basis: 100%;
+  }
+
   .training-command-center.is-disconnected .training-command-copy h2 {
     font-size: clamp(34px, 11vw, 42px);
   }
@@ -17165,6 +17476,10 @@ tr.data-intervals-row-missing {
   background: rgba(38, 34, 28, 0.06);
 }
 
+:root[data-theme="paper"] .spotify-connect-note {
+  color: var(--text-secondary);
+}
+
 :root[data-theme="paper"] .service-open-link {
   background: rgba(38, 34, 28, 0.04);
 }
@@ -19056,4 +19371,202 @@ tr.data-intervals-row-missing {
   .calendar-weekstats {
     display: none;
   }
+}
+
+/* ----- Settings view ----- */
+
+.settings-view {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 980px;
+}
+
+.settings-about-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.settings-about-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.settings-about-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  flex-shrink: 0;
+}
+
+.settings-about-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-about-copy h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.settings-about-copy p {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.settings-about-copy .settings-update-status {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.settings-about-header .secondary-button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.settings-version-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-bg);
+}
+
+.settings-version-grid dt {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.settings-version-grid dd {
+  margin: 4px 0 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-about-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-about-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 13px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-bg);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.settings-about-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.settings-storage-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 14px 0 0;
+  padding: 0;
+}
+
+.settings-storage-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-bg);
+}
+
+.settings-storage-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-storage-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.settings-storage-size {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-storage-info p {
+  margin: 4px 0 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.settings-storage-path {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-storage-row .secondary-button {
+  flex-shrink: 0;
+  min-height: 38px;
+  white-space: nowrap;
+}
+
+.settings-storage-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 0;
+  color: var(--text-muted);
+}
+
+@media (max-width: 720px) {
+  .settings-about-header {
+    flex-wrap: wrap;
+  }
+
+  .settings-storage-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* When the window is hidden or unfocused, freeze all CSS animations so the
+   renderer and GPU process stop repainting decorative effects nobody can see.
+   The class is toggled on <body> from App.tsx (visibilitychange/focus/blur). */
+body.is-backgrounded *,
+body.is-backgrounded *::before,
+body.is-backgrounded *::after {
+  animation-play-state: paused !important;
+}
+
+/* Keep activity indicators alive so in-progress work still reads as running. */
+body.is-backgrounded .spin,
+body.is-backgrounded .training-backup-progress-track.is-indeterminate span {
+  animation-play-state: running !important;
 }
