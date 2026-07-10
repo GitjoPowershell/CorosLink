@@ -1090,6 +1090,8 @@ export interface ClaudeCodePermissions {
 export interface ClaudeCodeConfig {
   /** Optional user-selected path. CorosLink never reads Claude credential files. */
   executablePath?: string;
+  /** Model alias (e.g. "opus", "sonnet", "haiku") or full id. Empty = account default. */
+  model?: string;
   lastConnectionStatus?: ClaudeCodeConnectionState;
   lastCheckedAt?: string;
   permissions: ClaudeCodePermissions;
@@ -1258,6 +1260,12 @@ export type ChatStreamInfo =
       /** Raw event type, e.g. "response.mcp_call.completed". */
       status: string;
       message?: string;
+    }
+  | {
+      requestId: string;
+      kind: "thinking";
+      /** Incremental extended-thinking text from the model. */
+      delta: string;
     }
   | {
       requestId: string;

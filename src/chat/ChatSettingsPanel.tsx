@@ -199,6 +199,21 @@ export function ChatSettingsPanel({
           </div>
         </label>
 
+        <label className="chat-local-field">
+          <span>Model</span>
+          <select
+            value={chatSettings.claudeCode.model ?? ""}
+            onChange={(event) =>
+              onUpdateClaudeCode({ model: event.target.value })
+            }
+          >
+            <option value="">Account default</option>
+            <option value="opus">Opus (most capable)</option>
+            <option value="sonnet">Sonnet (balanced)</option>
+            <option value="haiku">Haiku (fastest)</option>
+          </select>
+        </label>
+
         <div className="chat-claude-status" data-state={claudeStatus?.state}>
           {checkingClaude || connectingClaude ? (
             <Loader2 className="chat-spinner" size={15} aria-hidden="true" />

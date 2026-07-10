@@ -7,6 +7,7 @@ import {
 export const CHAT_SETTINGS_KEYS = {
   provider: "chat.provider",
   claudeExecutablePath: "chat.claudeCode.executablePath",
+  claudeModel: "chat.claudeCode.model",
   claudeLastConnectionStatus: "chat.claudeCode.lastConnectionStatus",
   claudeLastCheckedAt: "chat.claudeCode.lastCheckedAt",
   claudeRecentActivities: "chat.claudeCode.permissions.recentActivities",
@@ -43,6 +44,7 @@ export function readChatSettingsFromStore(
     claudeCode: {
       executablePath:
         store.get(CHAT_SETTINGS_KEYS.claudeExecutablePath) || undefined,
+      model: store.get(CHAT_SETTINGS_KEYS.claudeModel) || undefined,
       lastConnectionStatus: normalizeClaudeConnectionStatus(
         store.get(CHAT_SETTINGS_KEYS.claudeLastConnectionStatus)
       ),
@@ -85,6 +87,12 @@ export function saveChatSettingsToStore(
     store.set(CHAT_SETTINGS_KEYS.claudeExecutablePath, executablePath);
   } else {
     store.delete([CHAT_SETTINGS_KEYS.claudeExecutablePath]);
+  }
+  const claudeModel = settings.claudeCode?.model?.trim();
+  if (claudeModel) {
+    store.set(CHAT_SETTINGS_KEYS.claudeModel, claudeModel);
+  } else {
+    store.delete([CHAT_SETTINGS_KEYS.claudeModel]);
   }
   if (settings.claudeCode?.lastConnectionStatus) {
     store.set(

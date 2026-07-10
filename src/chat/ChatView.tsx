@@ -360,6 +360,8 @@ export function ChatView({
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
+  const [thinkingText, setThinkingText] = useState("");
+  const [activeTool, setActiveTool] = useState<string | null>(null);
   const [exportingLatestActivity, setExportingLatestActivity] = useState(false);
   const [currentSource, setCurrentSource] = useState<SourceInfo | null>(null);
   const [mcpStatus, setMcpStatus] = useState<CorosMcpStatus | null>(null);
@@ -589,6 +591,8 @@ export function ChatView({
       activeRequestIdRef.current = null;
       setStreaming(false);
       setStreamingText("");
+      setThinkingText("");
+      setActiveTool(null);
       const source = sourceRef.current ?? undefined;
       setCurrentSource(null);
       sourceRef.current = null;
@@ -614,9 +618,12 @@ export function ChatView({
       api.onChatStreamStart((payload) => {
         if (payload.requestId !== activeRequestIdRef.current) return;
         setStreamingText("");
+        setThinkingText("");
+        setActiveTool(null);
       }),
       api.onChatStreamToken((payload) => {
         if (payload.requestId !== activeRequestIdRef.current) return;
+        setActiveTool(null);
         setStreamingText((prev) => prev + payload.delta);
       }),
       api.onChatStreamInfo((payload) => {
@@ -647,7 +654,10 @@ export function ChatView({
           if (chatSettings.visualizationsEnabled) {
             setTimeline((prev) => upsertHrZoneEntry(prev, payload.preview));
           }
+        } else if (payload.kind === "thinking") {
+          setThinkingText((prev) => prev + payload.delta);
         } else if (payload.kind === "mcp") {
+          setActiveTool(payload.status === "call" ? payload.tool ?? null : null);
           const base: SourceInfo = sourceRef.current ?? {
             snapshotIncluded: false,
             mcpEnabled: true,
@@ -677,6 +687,8 @@ export function ChatView({
         activeRequestIdRef.current = null;
         setStreaming(false);
         setStreamingText("");
+        setThinkingText("");
+        setActiveTool(null);
         setCurrentSource(null);
         sourceRef.current = null;
         onError(payload.message);
@@ -699,7 +711,7 @@ export function ChatView({
   // Keep the transcript scrolled to the newest content.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [timeline, streamingText, exportingLatestActivity]);
+  }, [timeline, streamingText, thinkingText, exportingLatestActivity]);
 
   const handleSignIn = async () => {
     if (!api) return;
@@ -1774,14 +1786,31 @@ export function ChatView({
                 <Sparkles size={16} aria-hidden="true" />
               </div>
               <div className="chat-bubble">
+                {streamingText && thinkingText ? (
+                  <details className="chat-thinking">
+                    <summary>Thought process</summary>
+                    <p className="chat-thinking-text">{thinkingText}</p>
+                  </details>
+                ) : null}
                 {streamingText ? (
                   <AssistantMarkdown content={streamingText} streaming />
                 ) : (
-                  <span className="chat-typing">
-                    <span />
-                    <span />
-                    <span />
-                  </span>
+                  <div className="chat-stream-pending">
+                    <span className="chat-stream-status">
+                      {activeTool
+                        ? `Using ${activeTool.replace(/_/g, " ")}…`
+                        : thinkingText
+                          ? "Thinking…"
+                          : "Working on it…"}
+                    </span>
+                    {thinkingText ? (
+                      <p className="chat-thinking-preview">
+                        {thinkingText.length > 280
+                          ? `…${thinkingText.slice(-280)}`
+                          : thinkingText}
+                      </p>
+                    ) : null}
+                  </div>
                 )}
                 {currentSource ? <SourceBadge source={currentSource} /> : null}
               </div>

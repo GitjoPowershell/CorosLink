@@ -16153,6 +16153,76 @@ tr.data-intervals-row-missing {
   40% { opacity: 1; transform: translateY(-3px); }
 }
 
+/* Streaming placeholder: shimmering status + live thinking preview */
+.chat-stream-pending {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 160px;
+}
+
+.chat-stream-status {
+  display: inline-block;
+  width: fit-content;
+  font-size: 13px;
+  font-weight: 600;
+  background: linear-gradient(
+    90deg,
+    var(--text-muted) 30%,
+    var(--accent) 50%,
+    var(--text-muted) 70%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: chat-shimmer 2s linear infinite;
+}
+
+@keyframes chat-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+.chat-thinking-preview {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  font-style: italic;
+  color: var(--text-muted);
+  opacity: 0.85;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 108px;
+  overflow: hidden;
+}
+
+/* Collapsible thought process once the answer starts streaming */
+.chat-thinking {
+  margin-bottom: 8px;
+  border-left: 2px solid var(--glass-border);
+  padding-left: 10px;
+}
+
+.chat-thinking summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.chat-thinking-text {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
 @keyframes chat-row-enter {
   from {
     opacity: 0;
@@ -16232,6 +16302,12 @@ tr.data-intervals-row-missing {
   .chat-mcp-pill.connected::before,
   .chat-mcp-panel {
     animation: none;
+  }
+
+  .chat-stream-status {
+    animation: none;
+    background: none;
+    color: var(--text-muted);
   }
 
   .chat-markdown-streaming > :last-child::after {

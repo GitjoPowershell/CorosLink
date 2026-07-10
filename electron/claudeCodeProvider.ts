@@ -48,6 +48,7 @@ export class ClaudeCodeProviderError extends Error {
 
 export interface ClaudeCodeToolCallbacks {
   onToken(delta: string): void;
+  onThinking?(delta: string): void;
   onToolCallStart?(toolName: string): void;
   onToolCallError?(toolName: string, message: string): void;
   onToolCall(
@@ -63,6 +64,8 @@ export interface StreamClaudeCodeOptions extends ClaudeCodeToolCallbacks {
   tools: CorosMcpTool[];
   signal: AbortSignal;
   timeoutMs?: number;
+  /** Model alias (opus/sonnet/haiku) or full id. Omit for the account default. */
+  model?: string;
 }
 
 interface ClaudeAuthStatusPayload {
@@ -366,10 +369,18 @@ export async function streamClaudeCodeCompletion(
     controller.abort();
   };
   options.signal.addEventListener("abort", onAbort, { once: true });
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, options.timeoutMs ?? REQUEST_TIMEOUT_MS);
+  // Inactivity timeout: long agent turns (tool calls, plan drafting) are fine
+  // as long as the stream keeps producing; only abort when it goes quiet.
+  const idleTimeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const armIdleTimeout = () => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, idleTimeoutMs);
+  };
+  armIdleTimeout();
 
   let fullText = "";
   let resultText = "";
@@ -384,6 +395,7 @@ export async function streamClaudeCodeCompletion(
         async (args) => {
           const parsedArgs = args as Record<string, unknown>;
           options.onToolCallStart?.(sourceTool.name);
+          armIdleTimeout();
           try {
             const output = await options.onToolCall(sourceTool.name, parsedArgs);
             return { content: [{ type: "text" as const, text: output }] };
@@ -394,6 +406,8 @@ export async function streamClaudeCodeCompletion(
               content: [{ type: "text" as const, text: `Error: ${message}` }],
               isError: true
             };
+          } finally {
+            armIdleTimeout();
           }
         }
       );
@@ -416,6 +430,7 @@ export async function streamClaudeCodeCompletion(
         abortController: controller,
         pathToClaudeCodeExecutable: options.executablePath,
         systemPrompt: options.instructions,
+        ...(options.model ? { model: options.model } : {}),
         tools: [],
         allowedTools,
         permissionMode: "dontAsk",
@@ -430,6 +445,7 @@ export async function streamClaudeCodeCompletion(
     });
 
     for await (const message of stream) {
+      armIdleTimeout();
       if (message.type === "stream_event") {
         const event = message.event;
         if (
@@ -439,6 +455,11 @@ export async function streamClaudeCodeCompletion(
           const delta = event.delta.text;
           fullText += delta;
           options.onToken(delta);
+        } else if (
+          event.type === "content_block_delta" &&
+          event.delta.type === "thinking_delta"
+        ) {
+          options.onThinking?.(event.delta.thinking);
         }
         continue;
       }
@@ -477,7 +498,7 @@ export async function streamClaudeCodeCompletion(
   } catch (caught) {
     if (timedOut) {
       throw new ClaudeCodeProviderError(
-        "Claude Code took too long to respond. Try again.",
+        "Claude Code stopped responding. Try again.",
         "timeout"
       );
     }

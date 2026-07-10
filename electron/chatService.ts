@@ -627,9 +627,13 @@ export async function streamChat(
         messages,
         tools: chatTools,
         signal: controller.signal,
+        model: settings.claudeCode.model,
         onToken: (delta) => {
           fullText += delta;
           send("chat:streamToken", { requestId, delta });
+        },
+        onThinking: (delta) => {
+          send("chat:streamInfo", { requestId, kind: "thinking", delta });
         },
         onToolCallStart: (toolName) => {
           send("chat:streamInfo", {
