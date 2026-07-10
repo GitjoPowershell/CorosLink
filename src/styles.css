@@ -18859,6 +18859,42 @@ tr.data-intervals-row-missing {
 .calendar-sport-bike { border-right-color: color-mix(in srgb, var(--sport-bike) 60%, transparent); }
 .calendar-sport-other { border-right-color: color-mix(in srgb, var(--sport-other) 60%, transparent); }
 
+/* Settings → Activity colors card. */
+.settings-sport-hint {
+  margin: 4px 0 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.settings-sport-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-sport-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-sport-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  cursor: default;
+}
+.settings-sport-input {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
 .calendar-chip-title {
   display: flex;
   align-items: center;
