@@ -36,6 +36,7 @@ import {
   MapLayerControl,
   type ResolvedPoint
 } from "./panels";
+import { requestDeviceRouteLocation } from "./currentLocation";
 import { SketchPanel } from "./SketchPanel";
 import { SKETCH_TEMPLATES } from "./sketchShapes";
 import { useRouteDraw } from "./useRouteDraw";
@@ -162,8 +163,7 @@ export function RouteStudio({
 
   const handleUseCurrent = useCallback(() => {
     onError(null);
-    void api
-      .getApproximateRouteLocation()
+    void requestDeviceRouteLocation()
       .then((result) => {
         const resolved: ResolvedPoint = {
           lat: result.lat,
@@ -179,7 +179,7 @@ export function RouteStudio({
         setFitRequestId((id) => id + 1);
       })
       .catch((caught) => onError(toErrorMessage(caught)));
-  }, [api, onError]);
+  }, [onError]);
 
   const handleSelectStart = useCallback(
     (point: ResolvedPoint) => {

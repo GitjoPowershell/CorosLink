@@ -466,10 +466,6 @@ const api = {
     ipcRenderer.invoke("maps:saveRouteBuilderConfig", config),
   listGeneratedRoutes: (): Promise<GeneratedRoute[]> =>
     ipcRenderer.invoke("maps:listGeneratedRoutes"),
-  openLocationServicesSettings: (): Promise<void> =>
-    ipcRenderer.invoke("maps:openLocationServicesSettings"),
-  getApproximateRouteLocation: (): Promise<RouteGeocodeResult> =>
-    ipcRenderer.invoke("maps:getApproximateRouteLocation"),
   geocodeRouteLocation: (query: string): Promise<RouteGeocodeResult> =>
     ipcRenderer.invoke("maps:geocodeRouteLocation", query),
   searchRouteLocations: (query: string): Promise<RouteGeocodeResult[]> =>

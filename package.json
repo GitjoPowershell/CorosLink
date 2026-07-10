@@ -19,6 +19,7 @@
     "smoke:watch": "npm run build:electron && node scripts/smoke-watch-service.mjs",
     "test:watch-models": "npm run build:electron && node scripts/test-watch-models.mjs",
     "test:maps": "npm run build:electron && node scripts/test-maps.mjs",
+    "test:route-location": "node --experimental-strip-types scripts/test-route-location.mjs",
     "test:sketch": "npm run build:electron && node scripts/test-sketch-geometry.mjs",
     "test:greetings": "node --experimental-strip-types scripts/test-greetings.mjs",
     "test:intervals-match": "npm run build:electron && node scripts/test-intervals-match.mjs",
@@ -117,6 +118,9 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSLocationUsageDescription": "CorosLink uses your location only when you choose Use my location to set a route starting point."
+      },
       "notarize": true
     },
     "nsis": {

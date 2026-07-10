@@ -285,8 +285,6 @@ export interface CorosLinkApi {
     config: RouteBuilderConfig
   ) => Promise<RouteBuilderConfig>;
   listGeneratedRoutes: () => Promise<GeneratedRoute[]>;
-  openLocationServicesSettings: () => Promise<void>;
-  getApproximateRouteLocation: () => Promise<RouteGeocodeResult>;
   geocodeRouteLocation: (query: string) => Promise<RouteGeocodeResult>;
   searchRouteLocations: (query: string) => Promise<RouteGeocodeResult[]>;
   generateRoute: (request: GenerateRouteRequest) => Promise<GeneratedRoute>;

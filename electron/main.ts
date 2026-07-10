@@ -77,7 +77,6 @@ import {
   exportGeneratedRoute,
   generateRoute,
   geocodeRouteLocation,
-  getApproximateRouteLocation,
   getCorosMapInstallProgress,
   getCorosMapManifest,
   getRouteBuilderConfig,
@@ -89,7 +88,6 @@ import {
   listCorosMapDownloadJobs,
   listGeneratedRoutes,
   openCorosMapDownload,
-  openLocationServicesSettings,
   routeWaypoints,
   saveDrawnRoute,
   saveRouteBuilderConfig,
@@ -1132,14 +1130,6 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle("maps:listGeneratedRoutes", () => listGeneratedRoutes());
-
-  ipcMain.handle("maps:openLocationServicesSettings", () =>
-    openLocationServicesSettings()
-  );
-
-  ipcMain.handle("maps:getApproximateRouteLocation", () =>
-    getApproximateRouteLocation()
-  );
 
   ipcMain.handle("maps:geocodeRouteLocation", (_event, query: string) =>
     geocodeRouteLocation(query)

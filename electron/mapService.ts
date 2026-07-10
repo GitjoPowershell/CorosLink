@@ -178,16 +178,6 @@ interface OrsGeocodeResponse {
   }>;
 }
 
-interface ApproximateLocationResponse {
-  latitude?: number;
-  longitude?: number;
-  city?: string;
-  region?: string;
-  country_name?: string;
-  error?: boolean;
-  reason?: string;
-}
-
 let corosMapDownloadListener:
   | ((jobs: CorosMapDownloadJob[]) => void)
   | undefined;
@@ -1091,55 +1081,6 @@ function parseOrsErrorCode(details: string): number | undefined {
   } catch {
     return undefined;
   }
-}
-
-export async function openLocationServicesSettings(): Promise<void> {
-  if (process.platform === "darwin") {
-    await shell.openExternal(
-      "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices"
-    );
-    return;
-  }
-
-  if (process.platform === "win32") {
-    await shell.openExternal("ms-settings:privacy-location");
-    return;
-  }
-
-  throw new Error("Open your system location settings and allow CorosLink.");
-}
-
-export async function getApproximateRouteLocation(
-  fetchImpl: FetchLike = fetch
-): Promise<RouteGeocodeResult> {
-  const response = await fetchImpl("https://ipapi.co/json/", {
-    signal: AbortSignal.timeout(10_000)
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `Approximate location lookup failed: ${response.status} ${response.statusText}`
-    );
-  }
-
-  const payload = (await response.json()) as ApproximateLocationResponse;
-  if (
-    payload.error ||
-    !Number.isFinite(payload.latitude) ||
-    !Number.isFinite(payload.longitude)
-  ) {
-    throw new Error(payload.reason || "Approximate location was not available.");
-  }
-
-  return {
-    label: [
-      payload.city,
-      payload.region,
-      payload.country_name
-    ].filter(Boolean).join(", ") || "Approximate location",
-    lat: payload.latitude!,
-    lon: payload.longitude!
-  };
 }
 
 export async function geocodeRouteLocation(
