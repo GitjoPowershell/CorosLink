@@ -25,6 +25,8 @@ export interface WatchfaceStudioOptions {
   metricStyles?: WatchfaceMetricStyles;
   /** Independent hour/minute bitmap styles. */
   timeStyles?: WatchfaceTimeStyles;
+  /** Live AM/PM indicator sprite styling, when the template supports it. */
+  ampmStyle?: WatchfaceAmPmStyle;
 }
 
 export type WatchfaceAssetLoader = (
@@ -170,6 +172,173 @@ export function buildStaticSeparatorOverrides(
       ? [{ path: `${resolution.directory}/config.txt`, values }]
       : [];
   });
+}
+
+/**
+ * The AM/PM indicator stays a live sprite (the firmware swaps am/pm by the
+ * clock, in 12-hour mode), so unlike the static separators it cannot be baked
+ * into the background. Styling instead re-points the template's am/pm config
+ * keys at studio-generated sprites.
+ */
+export interface WatchfaceAmPmStyle {
+  enabled: boolean;
+  /** Top-left corner in preview-resolution coordinates (`am_pm_icon_pos`). */
+  x: number;
+  y: number;
+  scale: number;
+  color: string;
+}
+
+const AMPM_CONFIG_KEYS = ["am_icon", "pm_icon", "am_pm_icon_pos"] as const;
+// The main process only accepts created sprites under studio/<name>/NN.png,
+// so the AM icon becomes 00.png and the PM icon 01.png of one studio folder.
+const AMPM_SPRITE_FILES = { am: "studio/ampm/00.png", pm: "studio/ampm/01.png" };
+const AMPM_CONFIG_VALUES = { am: "studio\\ampm\\00.png", pm: "studio\\ampm\\01.png" };
+
+function findAmPmIcons(
+  resolution: CorosWatchfaceResolutionDetails
+): { am: CorosWatchfaceSpriteFile; pm: CorosWatchfaceSpriteFile } | null {
+  const lookup = (name: string) =>
+    resolution.icons.find(
+      (icon) =>
+        icon.path.toLowerCase() ===
+        `${resolution.directory}/icon/${name}`.toLowerCase()
+    ) ?? null;
+  const am = lookup("am.png");
+  const pm = lookup("pm.png");
+  return am && pm ? { am, pm } : null;
+}
+
+function resolutionSupportsAmPm(
+  resolution: CorosWatchfaceResolutionDetails
+): boolean {
+  return (
+    AMPM_CONFIG_KEYS.every((key) =>
+      Object.prototype.hasOwnProperty.call(resolution.config, key)
+    ) && findAmPmIcons(resolution) !== null
+  );
+}
+
+export interface WatchfaceAmPmCapability {
+  /** The preview resolution's AM icon, for bounds and preview sizing. */
+  icon: CorosWatchfaceSpriteFile;
+  /** Whether the template ships with the indicator already wired up. */
+  active: boolean;
+  defaultPos: { x: number; y: number };
+}
+
+/** Whether the template can show an AM/PM indicator, and where to start it. */
+export function getAmPmCapability(
+  details: CorosWatchfaceTemplateDetails
+): WatchfaceAmPmCapability | null {
+  const resolution = pickPreviewResolution(details);
+  if (!resolution || !resolutionSupportsAmPm(resolution)) {
+    return null;
+  }
+  const icons = findAmPmIcons(resolution)!;
+  let defaultPos = parseConfigPos(resolution.config["am_pm_icon_pos"]);
+  if (!defaultPos) {
+    const minutePos = parseConfigPos(resolution.config["time_minute_low_pos"]);
+    const minuteFile = findSpriteFolder(
+      resolution,
+      resolution.config["time_minute_low_font"]
+    )?.files[0];
+    defaultPos =
+      minutePos && minuteFile
+        ? {
+            x: minutePos.x + minuteFile.width + 12,
+            y: Math.round(
+              minutePos.y + minuteFile.height / 2 - icons.am.height / 2
+            )
+          }
+        : {
+            x: Math.round(resolution.width * 0.6),
+            y: Math.round(resolution.height * 0.45)
+          };
+  }
+  return {
+    icon: icons.am,
+    active: (resolution.config["am_icon"] ?? "") !== "",
+    defaultPos
+  };
+}
+
+/** Points the firmware's AM/PM keys at the studio sprites, or clears them. */
+export function buildAmPmOverrides(
+  details: CorosWatchfaceTemplateDetails,
+  style: WatchfaceAmPmStyle
+): CorosWatchfaceConfigOverride[] {
+  const base = pickPreviewResolution(details);
+  if (!base) {
+    return [];
+  }
+  return details.resolutions.flatMap((resolution) => {
+    if (!resolutionSupportsAmPm(resolution)) {
+      return [];
+    }
+    if (!style.enabled) {
+      // Restore the dormant form templates ship with, but only when the
+      // template arrived active; otherwise leave the config untouched.
+      return (resolution.config["am_icon"] ?? "") !== ""
+        ? [
+            {
+              path: `${resolution.directory}/config.txt`,
+              values: { am_icon: "", pm_icon: "", am_pm_icon_pos: "" }
+            }
+          ]
+        : [];
+    }
+    const scale = resolution.width / base.width;
+    return [
+      {
+        path: `${resolution.directory}/config.txt`,
+        values: {
+          am_icon: AMPM_CONFIG_VALUES.am,
+          pm_icon: AMPM_CONFIG_VALUES.pm,
+          am_pm_icon_pos: `{${Math.round(style.x * scale)},${Math.round(style.y * scale)}}`
+        }
+      }
+    ];
+  });
+}
+
+/** Generates the resized and tinted AM/PM sprites as new studio entries. */
+export async function buildAmPmSpriteReplacements(
+  details: CorosWatchfaceTemplateDetails,
+  style: WatchfaceAmPmStyle,
+  loadAssets: WatchfaceAssetLoader
+): Promise<CorosWatchfaceAssetReplacement[]> {
+  if (!style.enabled) {
+    return [];
+  }
+  const normalizedScale = Math.max(0.5, Math.min(2, style.scale));
+  const jobs: { source: CorosWatchfaceSpriteFile; path: string }[] = [];
+  for (const resolution of details.resolutions) {
+    if (!resolutionSupportsAmPm(resolution)) {
+      continue;
+    }
+    const icons = findAmPmIcons(resolution)!;
+    jobs.push(
+      { source: icons.am, path: `${resolution.directory}/${AMPM_SPRITE_FILES.am}` },
+      { source: icons.pm, path: `${resolution.directory}/${AMPM_SPRITE_FILES.pm}` }
+    );
+  }
+  const assets = await loadAssets([...new Set(jobs.map((job) => job.source.path))]);
+  const assetsByPath = new Map(assets.map((asset) => [asset.path, asset]));
+  const replacements: CorosWatchfaceAssetReplacement[] = [];
+  for (const job of jobs) {
+    replacements.push({
+      path: job.path,
+      dataUrl: await resizeAndTintSprite(
+        assetsByPath.get(job.source.path)?.dataUrl ?? "",
+        Math.max(1, Math.round(job.source.width * normalizedScale)),
+        Math.max(1, Math.round(job.source.height * normalizedScale)),
+        style.color
+      ),
+      create: true
+    });
+  }
+  return replacements;
 }
 
 /**
@@ -1333,6 +1502,16 @@ export async function drawStudioPreview(
     });
   }
 
+  const ampmIcons = options.ampmStyle?.enabled ? findAmPmIcons(resolution) : null;
+  const ampmFile = ampmIcons
+    ? now.getHours() < 12
+      ? ampmIcons.am
+      : ampmIcons.pm
+    : null;
+  if (ampmFile && !wantedSprites.has(ampmFile.path)) {
+    wantedSprites.set(ampmFile.path, { color: null });
+  }
+
   // Weekday label: sprite order inside week folders is firmware-defined, so
   // the preview simply shows one representative label sprite.
   const weekSource = findSpriteFolder(
@@ -1697,6 +1876,31 @@ export async function drawStudioPreview(
         glyph.file.height * scale
       );
       x += glyph.file.width;
+    }
+  }
+
+  // AM/PM indicator: shows whichever sprite matches the preview time, styled
+  // the same way the export will restyle the studio copies.
+  const ampmStyle = options.ampmStyle;
+  if (ampmStyle?.enabled && ampmFile) {
+    const ampmScale = Math.max(0.5, Math.min(2, ampmStyle.scale));
+    const width = Math.max(1, Math.round(ampmFile.width * ampmScale));
+    const height = Math.max(1, Math.round(ampmFile.height * ampmScale));
+    const sourceDataUrl = loadedAssets.get(ampmFile.path)?.dataUrl;
+    if (sourceDataUrl) {
+      const dataUrl = await resizeAndTintSprite(
+        sourceDataUrl,
+        width,
+        height,
+        ampmStyle.color
+      );
+      context.drawImage(
+        await loadStudioImage(dataUrl),
+        ampmStyle.x * scale,
+        ampmStyle.y * scale,
+        width * scale,
+        height * scale
+      );
     }
   }
 }

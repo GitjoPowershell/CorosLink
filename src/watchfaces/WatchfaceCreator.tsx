@@ -35,6 +35,8 @@ import type { CorosLinkApi } from "../coroslink-api";
 import {
   applyConfigOverridesToDetails,
   applyLayoutToDetails,
+  buildAmPmOverrides,
+  buildAmPmSpriteReplacements,
   buildLayoutOverrides,
   buildMetricOverrides,
   buildMetricSpriteReplacements,
@@ -46,6 +48,7 @@ import {
   computeLayoutGroupBounds,
   computeLayoutOffsetLimits,
   drawStudioPreview,
+  getAmPmCapability,
   getAvailableComplications,
   getFixedMetricCapabilities,
   inferStaticSeparators,
@@ -57,6 +60,7 @@ import {
   pickPreviewResolution,
   summarizeStudioReplacements,
   WATCHFACE_LAYOUT_GROUPS,
+  type WatchfaceAmPmStyle,
   type WatchfaceLayoutGroupBounds,
   type WatchfaceLayoutOffset,
   type WatchfaceMetricChanges,
@@ -110,6 +114,14 @@ const DEFAULT_STATIC_SEPARATORS: WatchfaceStaticSeparators = {
   dateSlash: { enabled: false, x: 400, y: 240, size: 48, color: "#ffffff" }
 };
 
+const DEFAULT_AMPM_STYLE: WatchfaceAmPmStyle = {
+  enabled: false,
+  x: 480,
+  y: 360,
+  scale: 1,
+  color: "#ffffff"
+};
+
 const MAX_DESIGN_SPRITES = 12;
 
 function separatorIdForGroup(groupId: string): WatchfaceStaticSeparatorId | null {
@@ -161,6 +173,8 @@ export function WatchfaceCreator({
   const [timeStyles, setTimeStyles] = useState<WatchfaceTimeStyles>({});
   const [staticSeparators, setStaticSeparators] =
     useState<WatchfaceStaticSeparators>(DEFAULT_STATIC_SEPARATORS);
+  const [ampmStyle, setAmpmStyle] =
+    useState<WatchfaceAmPmStyle>(DEFAULT_AMPM_STYLE);
   const [previewComplication, setPreviewComplication] =
     useState<WatchfaceComplicationId>("heartRate");
   const [layoutOffsets, setLayoutOffsets] = useState<
@@ -169,7 +183,7 @@ export function WatchfaceCreator({
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const dragRef = useRef<{
     groupId: string;
-    kind: "layout" | "separator" | "sprite";
+    kind: "layout" | "separator" | "ampm" | "sprite";
     startX: number;
     startY: number;
     baseDx: number;
@@ -205,6 +219,10 @@ export function WatchfaceCreator({
     () => (details ? getAvailableComplications(details) : []),
     [details]
   );
+  const ampmCapability = useMemo(
+    () => (details ? getAmPmCapability(details) : null),
+    [details]
+  );
   const metricOverrides = useMemo(
     () => (details ? buildMetricOverrides(details, metricChanges) : []),
     [details, metricChanges]
@@ -236,6 +254,12 @@ export function WatchfaceCreator({
         ? buildStaticSeparatorOverrides(details, staticSeparators)
         : [],
     [details, staticSeparators]
+  );
+  // Kept out of componentStyleOverrides: the preview cannot resolve the
+  // created studio/ampm sprites, so it renders from studioOptions instead.
+  const ampmOverrides = useMemo(
+    () => (details && ampmCapability ? buildAmPmOverrides(details, ampmStyle) : []),
+    [details, ampmCapability, ampmStyle]
   );
   const componentStyleOverrides = useMemo(
     () =>
@@ -315,6 +339,18 @@ export function WatchfaceCreator({
         y1: separator.y + height / 2
       }];
     });
+    const ampmBounds: WatchfaceLayoutGroupBounds[] = [];
+    if (ampmCapability && ampmStyle.enabled) {
+      const ampmScale = Math.max(0.5, Math.min(2, ampmStyle.scale));
+      ampmBounds.push({
+        id: "staticAmPm",
+        label: "AM/PM indicator",
+        x0: ampmStyle.x,
+        y0: ampmStyle.y,
+        x1: ampmStyle.x + ampmCapability.icon.width * ampmScale,
+        y1: ampmStyle.y + ampmCapability.icon.height * ampmScale
+      });
+    }
     const spriteBounds = designSprites.map((sprite) => {
       const width = sprite.width * sprite.scale;
       const height = sprite.height * sprite.scale;
@@ -332,8 +368,15 @@ export function WatchfaceCreator({
         y1: sprite.y + rotatedHeight / 2
       };
     });
-    return [...templateBounds, ...separatorBounds, ...spriteBounds];
-  }, [previewResolution, movableGroups, staticSeparators, designSprites]);
+    return [...templateBounds, ...separatorBounds, ...ampmBounds, ...spriteBounds];
+  }, [
+    previewResolution,
+    movableGroups,
+    staticSeparators,
+    ampmCapability,
+    ampmStyle,
+    designSprites
+  ]);
 
   const toResolutionPoint = useCallback(
     (event: { clientX: number; clientY: number }) => {
@@ -368,17 +411,27 @@ export function WatchfaceCreator({
     const sprite = spriteId
       ? designSprites.find((entry) => entry.id === spriteId)
       : undefined;
-    const offset = separatorId
-      ? {
-          dx: staticSeparators[separatorId].x,
-          dy: staticSeparators[separatorId].y
-        }
-      : sprite
-        ? { dx: sprite.x, dy: sprite.y }
-      : layoutOffsets[hit.id] ?? { dx: 0, dy: 0 };
+    const offset =
+      hit.id === "staticAmPm"
+        ? { dx: ampmStyle.x, dy: ampmStyle.y }
+        : separatorId
+          ? {
+              dx: staticSeparators[separatorId].x,
+              dy: staticSeparators[separatorId].y
+            }
+          : sprite
+            ? { dx: sprite.x, dy: sprite.y }
+            : layoutOffsets[hit.id] ?? { dx: 0, dy: 0 };
     dragRef.current = {
       groupId: hit.id,
-      kind: separatorId ? "separator" : sprite ? "sprite" : "layout",
+      kind:
+        hit.id === "staticAmPm"
+          ? "ampm"
+          : separatorId
+            ? "separator"
+            : sprite
+              ? "sprite"
+              : "layout",
       startX: point.x,
       startY: point.y,
       baseDx: offset.dx,
@@ -421,6 +474,29 @@ export function WatchfaceCreator({
             )
           )
         }
+      }));
+      return;
+    }
+    if (drag.kind === "ampm") {
+      if (!previewResolution) {
+        return;
+      }
+      setAmpmStyle((current) => ({
+        ...current,
+        x: Math.max(
+          0,
+          Math.min(
+            previewResolution.width,
+            Math.round(drag.baseDx + point.x - drag.startX)
+          )
+        ),
+        y: Math.max(
+          0,
+          Math.min(
+            previewResolution.height,
+            Math.round(drag.baseDy + point.y - drag.startY)
+          )
+        )
       }));
       return;
     }
@@ -576,6 +652,10 @@ export function WatchfaceCreator({
       (saved?.staticSeparators as WatchfaceStaticSeparators | undefined) ??
         DEFAULT_STATIC_SEPARATORS
     );
+    setAmpmStyle(
+      (saved?.ampmIndicator as WatchfaceAmPmStyle | undefined) ??
+        DEFAULT_AMPM_STYLE
+    );
     setDesignSprites(saved?.designSprites ?? []);
     setProjectId(initialProject?.projectId ?? null);
     setProjectName(
@@ -589,6 +669,18 @@ export function WatchfaceCreator({
           setDetails(described);
           if (!saved) {
             setStaticSeparators(inferStaticSeparators(described));
+          }
+          if (!saved?.ampmIndicator) {
+            // Seed from the template: keep a shipped-active indicator on and
+            // start it at the template's own (or an inferred) position.
+            const capability = getAmPmCapability(described);
+            if (capability) {
+              setAmpmStyle((current) => ({
+                ...current,
+                enabled: capability.active,
+                ...capability.defaultPos
+              }));
+            }
           }
         }
       })
@@ -753,7 +845,8 @@ export function WatchfaceCreator({
           tintIcons,
           previewComplication,
           metricStyles,
-          timeStyles
+          timeStyles,
+          ...(ampmCapability ? { ampmStyle } : {})
         },
         loadAssets
       ).catch(() => {
@@ -774,6 +867,8 @@ export function WatchfaceCreator({
     previewComplication,
     metricStyles,
     timeStyles,
+    ampmCapability,
+    ampmStyle,
     loadAssets
   ]);
 
@@ -872,6 +967,7 @@ export function WatchfaceCreator({
           )
         ),
         staticSeparators,
+        ampmIndicator: ampmStyle,
         layoutOffsets,
         designSprites
       };
@@ -921,10 +1017,15 @@ export function WatchfaceCreator({
               loadAssets
             )
           : [];
+      const ampmSpriteReplacements =
+        details && ampmCapability && ampmStyle.enabled
+          ? await buildAmPmSpriteReplacements(details, ampmStyle, loadAssets)
+          : [];
       const allAssetReplacements = mergeAssetReplacements(
         assetReplacements,
         metricSpriteReplacements,
-        timeSpriteReplacements
+        timeSpriteReplacements,
+        ampmSpriteReplacements
       );
       const exportMetricStyleOverrides =
         metricDetails && metricStyleActive
@@ -943,6 +1044,7 @@ export function WatchfaceCreator({
         exportMetricStyleOverrides,
         exportTimeStyleOverrides,
         staticSeparatorOverrides,
+        ampmOverrides,
         layoutOverrides
       );
       const archive = await api.createCorosWatchfaceArchive({
@@ -965,6 +1067,7 @@ export function WatchfaceCreator({
         ...(staticSeparators.colon.enabled || staticSeparators.dateSlash.enabled
           ? ["static separators"]
           : []),
+        ...(ampmCapability && ampmStyle.enabled ? ["an AM/PM indicator"] : []),
         ...(Object.keys(metricChanges).length > 0 ? ["live metric changes"] : [])
       ];
       onNotice(
@@ -1338,6 +1441,9 @@ export function WatchfaceCreator({
                 enter exact X/Y coordinates. Static separators are baked into
                 the background and do not blink. If the template uses a
                 combined cut.png, enable both to replace it without duplicates.
+                {ampmCapability
+                  ? " The AM/PM indicator stays a live sprite: the watch swaps AM and PM by the clock, in 12-hour mode."
+                  : null}
               </p>
               <div className="watchface-separator-grid">
                 {([
@@ -1450,6 +1556,107 @@ export function WatchfaceCreator({
                     </div>
                   );
                 })}
+                {ampmCapability ? (
+                  <div
+                    className={`watchface-separator-card ${ampmStyle.enabled ? "active" : ""}`}
+                  >
+                    <label className="watchface-separator-toggle">
+                      <input
+                        type="checkbox"
+                        checked={ampmStyle.enabled}
+                        disabled={disabled || creating}
+                        onChange={(event) =>
+                          setAmpmStyle((current) => ({
+                            ...current,
+                            enabled: event.target.checked
+                          }))
+                        }
+                      />
+                      <strong>AM/PM indicator</strong>
+                      <span>AM</span>
+                    </label>
+                    {ampmStyle.enabled ? (
+                      <div className="watchface-separator-controls">
+                        <label>
+                          X
+                          <input
+                            type="number"
+                            min={0}
+                            max={previewResolution.width}
+                            value={ampmStyle.x}
+                            disabled={disabled || creating}
+                            onChange={(event) =>
+                              setAmpmStyle((current) => ({
+                                ...current,
+                                x: Math.max(
+                                  0,
+                                  Math.min(
+                                    previewResolution.width,
+                                    Number(event.target.value) || 0
+                                  )
+                                )
+                              }))
+                            }
+                          />
+                        </label>
+                        <label>
+                          Y
+                          <input
+                            type="number"
+                            min={0}
+                            max={previewResolution.height}
+                            value={ampmStyle.y}
+                            disabled={disabled || creating}
+                            onChange={(event) =>
+                              setAmpmStyle((current) => ({
+                                ...current,
+                                y: Math.max(
+                                  0,
+                                  Math.min(
+                                    previewResolution.height,
+                                    Number(event.target.value) || 0
+                                  )
+                                )
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="watchface-metric-size">
+                          <span>Size</span>
+                          <input
+                            type="range"
+                            min="0.5"
+                            max="2"
+                            step="0.05"
+                            value={ampmStyle.scale}
+                            disabled={disabled || creating}
+                            onChange={(event) =>
+                              setAmpmStyle((current) => ({
+                                ...current,
+                                scale: Number(event.target.value)
+                              }))
+                            }
+                          />
+                          <output>{Math.round(ampmStyle.scale * 100)}%</output>
+                        </label>
+                        <label className="watchface-separator-color">
+                          Color
+                          <input
+                            type="color"
+                            value={ampmStyle.color}
+                            disabled={disabled || creating}
+                            onChange={(event) =>
+                              setAmpmStyle((current) => ({
+                                ...current,
+                                color: event.target.value
+                              }))
+                            }
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : null}

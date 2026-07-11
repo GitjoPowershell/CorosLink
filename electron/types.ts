@@ -301,6 +301,14 @@ export interface CorosWatchfaceDesignState {
     "colon" | "dateSlash",
     { enabled: boolean; x: number; y: number; size: number; color: string }
   >;
+  /** AM/PM indicator styling; absent in projects saved before the feature. */
+  ampmIndicator?: {
+    enabled: boolean;
+    x: number;
+    y: number;
+    scale: number;
+    color: string;
+  };
   layoutOffsets: Record<string, { dx: number; dy: number }>;
   designSprites: CorosWatchfaceDesignSprite[];
 }
