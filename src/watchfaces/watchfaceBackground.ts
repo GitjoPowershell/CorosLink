@@ -4,6 +4,7 @@ import {
   type WatchfaceAmPmStyle,
   type WatchfaceStaticSeparators
 } from "./watchfaceStudio";
+import { drawBackgroundElements } from "./watchfaceBackgroundElements";
 
 export const CREATOR_CANVAS_SIZE = 800;
 export const MAX_DESIGN_SPRITES = 12;
@@ -94,6 +95,11 @@ export async function renderDesignBackground(
   shade.addColorStop(1, "rgba(0, 0, 0, 0.56)");
   context.fillStyle = shade;
   context.fillRect(0, 0, size, size);
+
+  // Freeform shapes are authored directly in this 800px space.
+  if (design.backgroundElements && design.backgroundElements.length > 0) {
+    drawBackgroundElements(context, design.backgroundElements);
+  }
 
   const separatorScale = size / (previewWidth || size);
 

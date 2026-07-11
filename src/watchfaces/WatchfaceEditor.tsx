@@ -1,21 +1,38 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Circle,
   Eye,
   EyeOff,
   ImagePlus,
   Layers,
   Loader2,
+  Minus,
   Save,
+  Square,
   Trash2,
+  Type,
   WandSparkles
 } from "lucide-react";
 import type {
   CorosWatchfaceArchive,
+  CorosWatchfaceBackgroundElement,
+  CorosWatchfaceBackgroundEllipse,
+  CorosWatchfaceBackgroundLine,
+  CorosWatchfaceBackgroundRect,
+  CorosWatchfaceBackgroundText,
   CorosWatchfaceDesignState,
   CorosWatchfaceProject,
   CorosWatchfaceTemplateAsset,
   CorosWatchfaceTemplateDetails
 } from "../../electron/types";
+
+/** Any subset of shape fields, minus the discriminant, for in-place edits. */
+type BackgroundElementPatch = Partial<
+  Omit<CorosWatchfaceBackgroundRect, "kind"> &
+    Omit<CorosWatchfaceBackgroundEllipse, "kind"> &
+    Omit<CorosWatchfaceBackgroundLine, "kind"> &
+    Omit<CorosWatchfaceBackgroundText, "kind">
+>;
 import type { CorosLinkApi } from "../coroslink-api";
 import {
   deriveEditorLayers,
@@ -28,6 +45,13 @@ import {
   toStudioOptions
 } from "./watchfaceCompose";
 import { makeDefaultDesign, renderDesignBackground } from "./watchfaceBackground";
+import {
+  BACKGROUND_SPACE,
+  backgroundElementAtPoint,
+  backgroundElementBounds,
+  backgroundElementLabel,
+  createBackgroundElement
+} from "./watchfaceBackgroundElements";
 import {
   drawStudioPreview,
   pickPreviewResolution,
@@ -79,11 +103,12 @@ export function WatchfaceEditor({
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const assetCacheRef = useRef(new Map<string, CorosWatchfaceTemplateAsset>());
   const dragRef = useRef<{
-    groupId: string;
+    kind: "layout" | "bgElement";
+    targetId: string;
     startX: number;
     startY: number;
-    baseDx: number;
-    baseDy: number;
+    baseX: number;
+    baseY: number;
   } | null>(null);
 
   const [details, setDetails] = useState<CorosWatchfaceTemplateDetails | null>(null);
@@ -150,6 +175,45 @@ export function WatchfaceEditor({
     [details, design]
   );
   const selectedLayer = layers.find((layer) => layer.id === selectedId) ?? null;
+  const backgroundElements = design.backgroundElements ?? [];
+  const selectedElementId = selectedId.startsWith("bgel:")
+    ? selectedId.slice("bgel:".length)
+    : null;
+  const selectedElement =
+    backgroundElements.find((element) => element.id === selectedElementId) ?? null;
+  const backgroundContext = selectedId === "background" || selectedElement !== null;
+
+  function updateElement(id: string, patch: BackgroundElementPatch) {
+    setDesign((prev) => ({
+      ...prev,
+      backgroundElements: (prev.backgroundElements ?? []).map((element) =>
+        element.id === id
+          ? ({ ...element, ...patch } as CorosWatchfaceBackgroundElement)
+          : element
+      )
+    }));
+  }
+
+  function addElement(kind: CorosWatchfaceBackgroundElement["kind"]) {
+    const element = createBackgroundElement(
+      kind,
+      { x: BACKGROUND_SPACE / 2, y: BACKGROUND_SPACE / 2 },
+      design.fontFamily
+    );
+    setDesign((prev) => ({
+      ...prev,
+      backgroundElements: [...(prev.backgroundElements ?? []), element]
+    }));
+    setSelectedId(`bgel:${element.id}`);
+  }
+
+  function removeElement(id: string) {
+    setDesign((prev) => ({
+      ...prev,
+      backgroundElements: (prev.backgroundElements ?? []).filter((e) => e.id !== id)
+    }));
+    setSelectedId("background");
+  }
 
   // Repaint the background PNG whenever a background-affecting field changes.
   useEffect(() => {
@@ -196,7 +260,26 @@ export function WatchfaceEditor({
     canvas.width = PREVIEW_SIZE;
     canvas.height = PREVIEW_SIZE;
     const scale = canvas.width / previewWidth;
+    const bgScale = canvas.width / BACKGROUND_SPACE;
     context.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Freeform background shapes (drawn faint unless selected).
+    for (const element of backgroundElements) {
+      const box = backgroundElementBounds(element);
+      const active = selectedId === `bgel:${element.id}`;
+      context.strokeStyle = active
+        ? "rgba(81, 224, 181, 0.95)"
+        : "rgba(120, 200, 255, 0.28)";
+      context.lineWidth = active ? 2 : 1;
+      context.setLineDash(active ? [] : [4, 5]);
+      context.strokeRect(
+        box.x0 * bgScale,
+        box.y0 * bgScale,
+        (box.x1 - box.x0) * bgScale,
+        (box.y1 - box.y0) * bgScale
+      );
+    }
+
     for (const layer of layers) {
       if (!layer.bounds || layer.kind === "background" || !layer.visible) {
         continue;
@@ -215,7 +298,7 @@ export function WatchfaceEditor({
       );
     }
     context.setLineDash([]);
-  }, [layers, selectedId, previewWidth]);
+  }, [layers, selectedId, previewWidth, backgroundElements]);
 
   const toResolutionPoint = useCallback(
     (event: { clientX: number; clientY: number }) => {
@@ -237,19 +320,46 @@ export function WatchfaceEditor({
     if (!point) {
       return;
     }
-    const hit = editorLayerAtPoint(layers, point.x, point.y);
-    if (!hit) {
+    const toBg = BACKGROUND_SPACE / previewWidth;
+
+    // When working on the background, clicks target the freeform shapes that
+    // sit above it; otherwise the live firmware elements take priority.
+    const liveHit = editorLayerAtPoint(layers, point.x, point.y);
+    const liveIsElement = liveHit !== null && liveHit.kind !== "background";
+    if (backgroundContext || !liveIsElement) {
+      const bgHit = backgroundElementAtPoint(
+        backgroundElements,
+        point.x * toBg,
+        point.y * toBg
+      );
+      if (bgHit) {
+        setSelectedId(`bgel:${bgHit.id}`);
+        dragRef.current = {
+          kind: "bgElement",
+          targetId: bgHit.id,
+          startX: point.x * toBg,
+          startY: point.y * toBg,
+          baseX: bgHit.x,
+          baseY: bgHit.y
+        };
+        event.currentTarget.setPointerCapture(event.pointerId);
+        return;
+      }
+    }
+
+    if (!liveHit) {
       return;
     }
-    setSelectedId(hit.id);
-    if (hit.capabilities.position && hit.layoutGroupId) {
-      const offset = design.layoutOffsets?.[hit.layoutGroupId] ?? { dx: 0, dy: 0 };
+    setSelectedId(liveHit.id);
+    if (liveHit.capabilities.position && liveHit.layoutGroupId) {
+      const offset = design.layoutOffsets?.[liveHit.layoutGroupId] ?? { dx: 0, dy: 0 };
       dragRef.current = {
-        groupId: hit.layoutGroupId,
+        kind: "layout",
+        targetId: liveHit.layoutGroupId,
         startX: point.x,
         startY: point.y,
-        baseDx: offset.dx,
-        baseDy: offset.dy
+        baseX: offset.dx,
+        baseY: offset.dy
       };
       event.currentTarget.setPointerCapture(event.pointerId);
     }
@@ -264,12 +374,21 @@ export function WatchfaceEditor({
     if (!point) {
       return;
     }
+    if (drag.kind === "bgElement") {
+      const toBg = BACKGROUND_SPACE / previewWidth;
+      const clampBg = (v: number) => Math.max(0, Math.min(BACKGROUND_SPACE, Math.round(v)));
+      updateElement(drag.targetId, {
+        x: clampBg(drag.baseX + point.x * toBg - drag.startX),
+        y: clampBg(drag.baseY + point.y * toBg - drag.startY)
+      });
+      return;
+    }
     const clamp = (v: number) => Math.max(-400, Math.min(400, Math.round(v)));
-    const dx = clamp(drag.baseDx + point.x - drag.startX);
-    const dy = clamp(drag.baseDy + point.y - drag.startY);
+    const dx = clamp(drag.baseX + point.x - drag.startX);
+    const dy = clamp(drag.baseY + point.y - drag.startY);
     setDesign((prev) => ({
       ...prev,
-      layoutOffsets: { ...prev.layoutOffsets, [drag.groupId]: { dx, dy } }
+      layoutOffsets: { ...prev.layoutOffsets, [drag.targetId]: { dx, dy } }
     }));
   }
 
@@ -452,6 +571,31 @@ export function WatchfaceEditor({
                       )}
                     </button>
                   ) : null}
+                  {layer.kind === "background" && backgroundElements.length > 0 ? (
+                    <ul className="watchface-bg-sublayers">
+                      {backgroundElements.map((element) => (
+                        <li key={element.id}>
+                          <button
+                            type="button"
+                            className={`watchface-layer-row${selectedId === `bgel:${element.id}` ? " is-selected" : ""}`}
+                            onClick={() => setSelectedId(`bgel:${element.id}`)}
+                          >
+                            <span className="watchface-layer-name">
+                              {backgroundElementLabel(element)}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            className="watchface-layer-visibility"
+                            aria-label="Remove shape"
+                            onClick={() => removeElement(element.id)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -481,8 +625,16 @@ export function WatchfaceEditor({
         </div>
 
         <aside className="watchface-editor-inspector">
-          <p className="watchface-editor-pane-title">{selectedLayer?.label ?? "Inspector"}</p>
-          {selectedLayer ? renderInspector(selectedLayer) : null}
+          <p className="watchface-editor-pane-title">
+            {selectedElement
+              ? backgroundElementLabel(selectedElement)
+              : selectedLayer?.label ?? "Inspector"}
+          </p>
+          {selectedElement
+            ? renderElementInspector(selectedElement)
+            : selectedLayer
+              ? renderInspector(selectedLayer)
+              : null}
         </aside>
       </div>
     </section>
@@ -520,6 +672,15 @@ export function WatchfaceEditor({
               </button>
             </>
           ) : null}
+          <div className="watchface-shape-tools">
+            <span className="watchface-shape-tools-label">Add shape</span>
+            <div className="watchface-shape-tools-row">
+              <button type="button" onClick={() => addElement("rect")} aria-label="Add rectangle"><Square size={15} /></button>
+              <button type="button" onClick={() => addElement("ellipse")} aria-label="Add ellipse"><Circle size={15} /></button>
+              <button type="button" onClick={() => addElement("line")} aria-label="Add line"><Minus size={15} /></button>
+              <button type="button" onClick={() => addElement("text")} aria-label="Add text"><Type size={15} /></button>
+            </div>
+          </div>
         </div>
       );
     }
@@ -627,6 +788,140 @@ export function WatchfaceEditor({
             <button type="button" className="watchface-nudge-reset" onClick={() => nudge(-offset.dx, -offset.dy)}>Reset</button>
           ) : null}
         </div>
+      </div>
+    );
+  }
+
+  function renderElementInspector(element: CorosWatchfaceBackgroundElement) {
+    const set = (patch: BackgroundElementPatch) => updateElement(element.id, patch);
+    const hasFill = element.kind === "rect" || element.kind === "ellipse";
+    return (
+      <div className="watchface-inspector-group">
+        {hasFill ? (
+          <>
+            <label className="watchface-studio-toggle">
+              <input
+                type="checkbox"
+                checked={Boolean(element.gradient)}
+                onChange={(e) =>
+                  set(
+                    e.target.checked
+                      ? { gradient: { from: element.fill, to: "#04140f", angle: 90 } }
+                      : { gradient: undefined }
+                  )
+                }
+              />
+              Gradient fill
+            </label>
+            {element.gradient ? (
+              <>
+                <label className="field">
+                  From
+                  <span className="watchface-color-control">
+                    <input type="color" value={element.gradient.from} onChange={(e) => set({ gradient: { ...element.gradient!, from: e.target.value } })} />
+                    <code>{element.gradient.from}</code>
+                  </span>
+                </label>
+                <label className="field">
+                  To
+                  <span className="watchface-color-control">
+                    <input type="color" value={element.gradient.to} onChange={(e) => set({ gradient: { ...element.gradient!, to: e.target.value } })} />
+                    <code>{element.gradient.to}</code>
+                  </span>
+                </label>
+                <label className="field watchface-zoom-control">
+                  Angle <span>{element.gradient.angle}°</span>
+                  <input type="range" min="0" max="360" step="5" value={element.gradient.angle} onChange={(e) => set({ gradient: { ...element.gradient!, angle: Number(e.target.value) } })} />
+                </label>
+              </>
+            ) : (
+              <label className="field">
+                Fill
+                <span className="watchface-color-control">
+                  <input type="color" value={element.fill} onChange={(e) => set({ fill: e.target.value })} />
+                  <code>{element.fill}</code>
+                </span>
+              </label>
+            )}
+            <label className="field watchface-zoom-control">
+              Width <span>{element.width}px</span>
+              <input type="range" min="8" max="800" step="2" value={element.width} onChange={(e) => set({ width: Number(e.target.value) })} />
+            </label>
+            <label className="field watchface-zoom-control">
+              Height <span>{element.height}px</span>
+              <input type="range" min="8" max="800" step="2" value={element.height} onChange={(e) => set({ height: Number(e.target.value) })} />
+            </label>
+            {element.kind === "rect" ? (
+              <label className="field watchface-zoom-control">
+                Corner radius <span>{element.cornerRadius}px</span>
+                <input type="range" min="0" max="200" step="2" value={element.cornerRadius} onChange={(e) => set({ cornerRadius: Number(e.target.value) })} />
+              </label>
+            ) : null}
+          </>
+        ) : null}
+
+        {element.kind === "line" ? (
+          <>
+            <label className="field">
+              Color
+              <span className="watchface-color-control">
+                <input type="color" value={element.color} onChange={(e) => set({ color: e.target.value })} />
+                <code>{element.color}</code>
+              </span>
+            </label>
+            <label className="field watchface-zoom-control">
+              Length <span>{element.dx}px</span>
+              <input type="range" min="10" max="800" step="2" value={element.dx} onChange={(e) => set({ dx: Number(e.target.value) })} />
+            </label>
+            <label className="field watchface-zoom-control">
+              Thickness <span>{element.strokeWidth}px</span>
+              <input type="range" min="1" max="60" step="1" value={element.strokeWidth} onChange={(e) => set({ strokeWidth: Number(e.target.value) })} />
+            </label>
+          </>
+        ) : null}
+
+        {element.kind === "text" ? (
+          <>
+            <label className="field">
+              Text
+              <input value={element.text} maxLength={40} onChange={(e) => set({ text: e.target.value })} />
+            </label>
+            <label className="field">
+              Color
+              <span className="watchface-color-control">
+                <input type="color" value={element.color} onChange={(e) => set({ color: e.target.value })} />
+                <code>{element.color}</code>
+              </span>
+            </label>
+            <label className="field">
+              Font
+              <select value={element.fontFamily} onChange={(e) => set({ fontFamily: e.target.value })}>
+                <option value="">System</option>
+                {DIGIT_FONT_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
+              </select>
+            </label>
+            <label className="field watchface-zoom-control">
+              Size <span>{element.fontSize}px</span>
+              <input type="range" min="12" max="200" step="2" value={element.fontSize} onChange={(e) => set({ fontSize: Number(e.target.value) })} />
+            </label>
+            <label className="field">
+              Align
+              <select value={element.align} onChange={(e) => set({ align: e.target.value as CorosWatchfaceBackgroundText["align"] })}>
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+              </select>
+            </label>
+          </>
+        ) : null}
+
+        <label className="field watchface-zoom-control">
+          Rotation <span>{element.rotation}°</span>
+          <input type="range" min="0" max="360" step="5" value={element.rotation} onChange={(e) => set({ rotation: Number(e.target.value) })} />
+        </label>
+        <button className="secondary-button" type="button" onClick={() => removeElement(element.id)}>
+          <Trash2 size={15} /> Remove shape
+        </button>
       </div>
     );
   }

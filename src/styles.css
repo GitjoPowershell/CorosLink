@@ -21874,3 +21874,53 @@ body.is-backgrounded .training-backup-progress-track.is-indeterminate span {
   min-width: auto !important;
   font-size: 12px;
 }
+
+/* Background design canvas: sub-layers + shape tools */
+.watchface-editor-layers li {
+  flex-wrap: wrap;
+}
+.watchface-bg-sublayers {
+  flex-basis: 100%;
+  width: 100%;
+  margin: 2px 0 2px 12px;
+  padding-left: 8px;
+  border-left: 1px solid var(--glass-border);
+}
+.watchface-bg-sublayers .watchface-layer-row {
+  font-size: 12px;
+  padding: 5px 8px;
+}
+.watchface-shape-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--glass-border);
+}
+.watchface-shape-tools-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.watchface-shape-tools-row {
+  display: flex;
+  gap: 6px;
+}
+.watchface-shape-tools-row button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-bg);
+  padding: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.watchface-shape-tools-row button:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}

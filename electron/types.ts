@@ -290,6 +290,67 @@ export interface CorosWatchfaceDesignSprite {
   rotation: number;
 }
 
+/** A two-stop linear gradient fill, angle in degrees clockwise from +x. */
+export interface CorosWatchfaceGradientFill {
+  from: string;
+  to: string;
+  angle: number;
+}
+
+/** Base fields shared by every freeform background shape (in 800px space). */
+interface CorosWatchfaceBackgroundElementBase {
+  id: string;
+  x: number;
+  y: number;
+  rotation: number;
+}
+
+export interface CorosWatchfaceBackgroundRect extends CorosWatchfaceBackgroundElementBase {
+  kind: "rect";
+  width: number;
+  height: number;
+  cornerRadius: number;
+  fill: string;
+  gradient?: CorosWatchfaceGradientFill;
+  strokeColor?: string;
+  strokeWidth?: number;
+}
+
+export interface CorosWatchfaceBackgroundEllipse extends CorosWatchfaceBackgroundElementBase {
+  kind: "ellipse";
+  width: number;
+  height: number;
+  fill: string;
+  gradient?: CorosWatchfaceGradientFill;
+  strokeColor?: string;
+  strokeWidth?: number;
+}
+
+export interface CorosWatchfaceBackgroundLine extends CorosWatchfaceBackgroundElementBase {
+  kind: "line";
+  /** End point relative to (x, y). */
+  dx: number;
+  dy: number;
+  color: string;
+  strokeWidth: number;
+}
+
+export interface CorosWatchfaceBackgroundText extends CorosWatchfaceBackgroundElementBase {
+  kind: "text";
+  text: string;
+  fontFamily: string;
+  fontSize: number;
+  color: string;
+  weight: number;
+  align: "left" | "center" | "right";
+}
+
+export type CorosWatchfaceBackgroundElement =
+  | CorosWatchfaceBackgroundRect
+  | CorosWatchfaceBackgroundEllipse
+  | CorosWatchfaceBackgroundLine
+  | CorosWatchfaceBackgroundText;
+
 export interface CorosWatchfaceDesignState {
   version: 1;
   backgroundColor: string;
@@ -318,6 +379,11 @@ export interface CorosWatchfaceDesignState {
   };
   layoutOffsets: Record<string, { dx: number; dy: number }>;
   designSprites: CorosWatchfaceDesignSprite[];
+  /**
+   * Freeform vector shapes baked into the background PNG (800px space).
+   * Absent in projects saved before the background design canvas.
+   */
+  backgroundElements?: CorosWatchfaceBackgroundElement[];
 }
 
 export interface CorosWatchfaceProjectSummary {
