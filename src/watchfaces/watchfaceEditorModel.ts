@@ -11,6 +11,7 @@ import {
   buildTimeStyleOverrides,
   computeLayoutGroupBounds,
   getFixedMetricCapabilities,
+  getAmPmCapability,
   mergeConfigOverrides,
   pickPreviewResolution,
   WATCHFACE_LAYOUT_GROUPS,
@@ -67,6 +68,8 @@ export interface EditorLayer {
   spriteId?: string;
   /** Set for editor-authored colon and date-slash layers. */
   staticSeparatorId?: WatchfaceStaticSeparatorId;
+  /** Set for the firmware-swapped AM/PM sprite pair. */
+  ampmIndicator?: true;
   visible: boolean;
   /** Whether the user may hide/remove this layer. */
   canHide: boolean;
@@ -284,6 +287,40 @@ export function deriveEditorLayers(
     0,
     ...staticSeparatorLayers
   );
+
+  const ampmCapability = getAmPmCapability(details);
+  if (ampmCapability) {
+    const style = design.ampmIndicator ?? {
+      enabled: ampmCapability.active,
+      ...ampmCapability.defaultPos,
+      scale: 1,
+      color: design.digitColor
+    };
+    const width = ampmCapability.icon.width * style.scale;
+    const height = ampmCapability.icon.height * style.scale;
+    const ampmLayer: EditorLayer = {
+      id: "ampm",
+      kind: "separators",
+      label: "AM/PM indicator",
+      ampmIndicator: true,
+      visible: style.enabled,
+      canHide: true,
+      present: true,
+      bounds: style.enabled
+        ? {
+            id: "ampm",
+            label: "AM/PM indicator",
+            x0: style.x,
+            y0: style.y,
+            x1: style.x + width,
+            y1: style.y + height
+          }
+        : null,
+      capabilities: { position: true, color: true, scale: true, font: false }
+    };
+    const dateSlashIndex = layers.findIndex((layer) => layer.id === "staticDateSlash");
+    layers.splice(dateSlashIndex >= 0 ? dateSlashIndex + 1 : 2, 0, ampmLayer);
+  }
 
   for (const sprite of design.designSprites ?? []) {
     // Sprites are drawn centered on (x, y); match the guided creator's

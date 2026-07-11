@@ -114,6 +114,8 @@ const api = {
     ipcRenderer.invoke("watch:getStatus"),
   getCorosWatchfaceStatus: (): Promise<CorosWatchfaceStatus> =>
     ipcRenderer.invoke("watchfaces:getStatus"),
+  listLocalFontFamilies: (): Promise<string[]> =>
+    ipcRenderer.invoke("watchfaces:listLocalFontFamilies"),
   loginCorosWatchfaces: (
     email: string,
     password: string,

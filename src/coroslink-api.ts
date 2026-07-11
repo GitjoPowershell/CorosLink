@@ -110,6 +110,8 @@ export interface CorosLinkApi {
   platform: string;
   getWatchStatus: () => Promise<WatchStatus>;
   getCorosWatchfaceStatus: () => Promise<CorosWatchfaceStatus>;
+  /** Font families installed on this computer, for local watchface rasterization. */
+  listLocalFontFamilies: () => Promise<string[]>;
   loginCorosWatchfaces: (
     email: string,
     password: string,

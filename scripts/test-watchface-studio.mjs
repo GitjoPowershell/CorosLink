@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   applyConfigOverridesToDetails,
+  buildAmPmOverrides,
   buildDateStyleOverrides,
   buildLayerVisibilityOverrides,
   buildLayerColorOverrides,
@@ -9,9 +10,11 @@ import {
   buildMetricStyleOverrides,
   buildStaticSeparatorOverrides,
   buildTimeStyleOverrides,
+  buildTimeTrackingOverrides,
   computeLayoutGroupBounds,
   computeLayoutOffsetLimits,
   getAvailableComplications,
+  getAmPmCapability,
   getFixedMetricCapabilities,
   inferStaticSeparators,
   mergeAssetReplacements,
@@ -53,6 +56,15 @@ function resolution(width, digitWidth, digitHeight) {
       temperature_rect: "",
       temperature_font_color: "",
       temperature_negative_sign_icon: "",
+      control_temperature_icon_pos: "",
+      control_temperature_icon: "",
+      control_temperature_rect: "",
+      control_temperature_font: "",
+      control_temperature_font_color: "",
+      control_temperature_negative_sign_icon: "",
+      am_icon: "icon\\am.png",
+      pm_icon: "icon\\pm.png",
+      am_pm_icon_pos: `{${Math.round(width * 0.6)},${Math.round(width * 0.125)}}`,
       colon_icon: "icon\\colon.png",
       arc_cut_icon_pos: `{${Math.round(width * 0.3)},${Math.round(width * 0.2)}}`,
       arc_cut_icon: "icon\\cut.png",
@@ -102,6 +114,16 @@ function resolution(width, digitWidth, digitHeight) {
         path: `${directory}/icon/cut.png`,
         width: Math.round(width * 0.2),
         height: Math.round(width * 0.3)
+      },
+      {
+        path: `${directory}/icon/am.png`,
+        width: Math.round(width * 0.08),
+        height: Math.round(width * 0.04)
+      },
+      {
+        path: `${directory}/icon/pm.png`,
+        width: Math.round(width * 0.08),
+        height: Math.round(width * 0.04)
       }
     ]
   };
@@ -111,6 +133,40 @@ const details = {
   archiveId: "fixture",
   resolutions: [resolution(416, 23, 33), resolution(800, 44, 64)]
 };
+
+assert.deepEqual(getAmPmCapability(details), {
+  icon: {
+    path: "watchface_800x800/icon/am.png",
+    width: 64,
+    height: 32
+  },
+  active: true,
+  defaultPos: { x: 480, y: 100 }
+});
+const hiddenAmPm = buildAmPmOverrides(details, {
+  enabled: false,
+  x: 480,
+  y: 100,
+  scale: 1,
+  color: "#ffffff"
+});
+assert.equal(hiddenAmPm.length, 2);
+assert.deepEqual(
+  hiddenAmPm.find((entry) => entry.path.includes("800x800"))?.values,
+  { am_icon: "", pm_icon: "", am_pm_icon_pos: "" }
+);
+const positionedAmPm = buildAmPmOverrides(details, {
+  enabled: true,
+  x: 240,
+  y: 50,
+  scale: 1,
+  color: "#ffffff"
+});
+assert.equal(
+  positionedAmPm.find((entry) => entry.path.includes("416x416"))?.values
+    .am_pm_icon_pos,
+  "{125,26}"
+);
 
 assert.deepEqual(
   getFixedMetricCapabilities(details),
@@ -146,7 +202,12 @@ assert.equal(
   full.values.temperature_rect,
   "{334,528,466,592,hcenter|vcenter}"
 );
-assert.equal(full.values.temperature_font, "13x19");
+assert.equal(full.values.temperature_font, undefined);
+assert.equal(full.values.control_temperature_font, "13x19");
+assert.equal(
+  full.values.control_temperature_rect,
+  "{92,0,279,63,hcenter|vcenter}"
+);
 assert.equal(full.values.kcal_rect, "");
 assert.equal(full.values.kcal_font, "");
 assert.deepEqual(
@@ -223,7 +284,20 @@ assert.equal(
   "{318,520,483,600,hcenter|vcenter}"
 );
 assert.equal(fullMetricStyle?.values.temperature_font_color, "0x33AA55");
-assert.equal(fullMetricStyle?.values.temperature_font, "cl_temp");
+assert.equal(fullMetricStyle?.values.temperature_font, undefined);
+assert.equal(fullMetricStyle?.values.control_temperature_font, "cl_temp");
+assert.equal(fullMetricStyle?.values.control_temperature_font_color, "0x33AA55");
+const metricStyleWithoutColor = buildMetricStyleOverrides(
+  withMetrics,
+  { temperature: { scale: 1 } },
+  true
+).find((entry) => entry.path.includes("800x800"));
+assert.equal(metricStyleWithoutColor?.values.temperature_font_color, undefined);
+assert.equal(
+  metricStyleWithoutColor?.values.control_temperature_font_color,
+  undefined
+);
+assert.equal(metricStyleWithoutColor?.values.control_temperature_font, "cl_temp");
 const timeStyleOverrides = buildTimeStyleOverrides(
   withMetrics,
   { hours: { color: "#33ddff", scale: 1.5 } },
@@ -236,6 +310,14 @@ assert.equal(fullTimeStyle?.values.time_hour_high_pos, "{74,84}");
 assert.equal(fullTimeStyle?.values.time_hour_low_pos, "{164,84}");
 assert.equal(fullTimeStyle?.values.time_hour_high_font, "cl_hh");
 assert.equal(fullTimeStyle?.values.time_hour_low_font, "cl_hl");
+const timeTrackingOverrides = buildTimeTrackingOverrides(withMetrics, 0.2);
+const fullTimeTracking = timeTrackingOverrides.find((entry) =>
+  entry.path.includes("800x800")
+);
+assert.equal(fullTimeTracking?.values.time_hour_high_pos, "{94,100}");
+assert.equal(fullTimeTracking?.values.time_hour_low_pos, "{166,100}");
+assert.equal(fullTimeTracking?.values.time_minute_high_pos, "{274,100}");
+assert.equal(fullTimeTracking?.values.time_minute_low_pos, "{346,100}");
 const dateStyleOverrides = buildDateStyleOverrides(
   withMetrics,
   {

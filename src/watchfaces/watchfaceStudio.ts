@@ -12,7 +12,15 @@ import type {
  * re-rendered from a locally installed font; weekday labels, battery digits,
  * and icons are recolored in place so their glyph shapes stay intact.
  */
-export interface WatchfaceStudioOptions {
+export interface WatchfaceTypography {
+  /** CSS-like weight, constrained to the 100–900 font-weight scale. */
+  fontWeight?: number;
+  fontStyle?: "normal" | "italic";
+  /** Character spacing expressed as a fraction of the rendered font size. */
+  letterSpacing?: number;
+}
+
+export interface WatchfaceStudioOptions extends WatchfaceTypography {
   /** Empty string keeps the template's original digit bitmaps. */
   fontFamily: string;
   digitColor: string;
@@ -356,7 +364,8 @@ export function renderDigitSprite(
   width: number,
   height: number,
   fontFamily: string,
-  color: string
+  color: string,
+  typography: WatchfaceTypography = {}
 ): string {
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -366,11 +375,17 @@ export function renderDigitSprite(
     throw new Error("Sprite rendering is unavailable in this window.");
   }
 
+  const fontWeight = normalizeFontWeight(typography.fontWeight);
+  const fontStyle = typography.fontStyle === "italic" ? "italic" : "normal";
+  const letterSpacing = Math.max(-0.1, Math.min(0.25, typography.letterSpacing ?? 0));
   let fontSize = Math.floor(height * 0.92);
   context.textBaseline = "alphabetic";
   context.fillStyle = color;
   for (; fontSize > 4; fontSize -= 1) {
-    context.font = `600 ${fontSize}px ${quoteFontFamily(fontFamily)}`;
+    // Use the font's Regular face by default, matching what desktop editors
+    // such as Word show when a family is chosen without applying Bold.
+    context.font = `${fontStyle} ${fontWeight} ${fontSize}px ${quoteFontFamily(fontFamily)}`;
+    setCanvasLetterSpacing(context, fontSize * letterSpacing);
     const metrics = context.measureText(text);
     const glyphHeight =
       metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
@@ -387,6 +402,18 @@ export function renderDigitSprite(
     (height - glyphHeight) / 2 + metrics.actualBoundingBoxAscent
   );
   return canvas.toDataURL("image/png");
+}
+
+function normalizeFontWeight(weight: number | undefined): number {
+  const rounded = Math.round((weight ?? 400) / 100) * 100;
+  return Math.max(100, Math.min(900, rounded));
+}
+
+/** Electron's Chromium supports canvas letter spacing; older runtimes ignore it safely. */
+function setCanvasLetterSpacing(context: CanvasRenderingContext2D, pixels: number): void {
+  if ("letterSpacing" in context) {
+    context.letterSpacing = `${pixels}px`;
+  }
 }
 
 /** Recolors a sprite while preserving its alpha silhouette. */
@@ -467,7 +494,8 @@ export async function buildStudioReplacements(
               file.width,
               file.height,
               options.fontFamily,
-              color
+              color,
+              options
             )
           });
         });
@@ -556,7 +584,8 @@ export type WatchfaceMetricId =
   | "temperature";
 
 export interface WatchfaceMetricSpriteStyle {
-  color: string;
+  /** Absent preserves the template sprite color. */
+  color?: string;
   /** Scale relative to the source template digit sprites. */
   scale: number;
   /** Optional per-layer font; falls back to the design font. */
@@ -662,9 +691,8 @@ interface WatchfaceFixedMetricDefinition {
   id: WatchfaceMetricId;
   label: string;
   rectKey: string;
-  fontKey: string;
-  /** Some templates omit this otherwise valid key when the metric is inactive. */
-  allowMissingFontKey?: boolean;
+  /** Fixed temperature is firmware-rendered and has no temperature_font key. */
+  fontKey?: string;
   fontColorKey?: string;
   negativeSignKey?: string;
   controlPrefix: string;
@@ -726,8 +754,6 @@ export const WATCHFACE_FIXED_METRICS: WatchfaceFixedMetricDefinition[] = [
     id: "temperature",
     label: "Temperature",
     rectKey: "temperature_rect",
-    fontKey: "temperature_font",
-    allowMissingFontKey: true,
     fontColorKey: "temperature_font_color",
     negativeSignKey: "temperature_negative_sign_icon",
     controlPrefix: "temperature",
@@ -779,7 +805,7 @@ export function getFixedMetricCapabilities(
   }
   return WATCHFACE_FIXED_METRICS.flatMap((metric) =>
     Object.prototype.hasOwnProperty.call(resolution.config, metric.rectKey) &&
-    (metric.allowMissingFontKey ||
+    (!metric.fontKey ||
       Object.prototype.hasOwnProperty.call(resolution.config, metric.fontKey))
       ? [{
           id: metric.id,
@@ -811,7 +837,7 @@ function metricFontFolder(
   metric: WatchfaceFixedMetricDefinition
 ): PreviewDigitSource | null {
   const candidates = [
-    resolution.config[metric.fontKey],
+    metric.fontKey ? resolution.config[metric.fontKey] : undefined,
     resolution.config[`control_${metric.controlPrefix}_font`],
     resolution.config["control_step_font"],
     resolution.config["time_second_high_font"],
@@ -865,7 +891,7 @@ export function buildMetricOverrides(
       if (
         enabled === undefined ||
         !Object.prototype.hasOwnProperty.call(resolution.config, metric.rectKey) ||
-        (!metric.allowMissingFontKey &&
+        (metric.fontKey &&
           !Object.prototype.hasOwnProperty.call(resolution.config, metric.fontKey))
       ) {
         continue;
@@ -873,12 +899,27 @@ export function buildMetricOverrides(
       if (!enabled) {
         values[metric.rectKey] = "";
         if (
+          metric.fontKey &&
           Object.prototype.hasOwnProperty.call(resolution.config, metric.fontKey)
         ) {
           values[metric.fontKey] = "";
         }
         if (metric.negativeSignKey) {
           values[metric.negativeSignKey] = "";
+        }
+        if (metric.id === "temperature") {
+          for (const key of [
+            "control_temperature_icon_pos",
+            "control_temperature_icon",
+            "control_temperature_rect",
+            "control_temperature_font",
+            "control_temperature_font_color",
+            "control_temperature_negative_sign_icon"
+          ]) {
+            if (Object.prototype.hasOwnProperty.call(resolution.config, key)) {
+              values[key] = "";
+            }
+          }
         }
         continue;
       }
@@ -896,11 +937,48 @@ export function buildMetricOverrides(
       const x1 = Math.min(resolution.width, x0 + rectWidth);
       const y1 = Math.min(resolution.height, y0 + rectHeight);
       values[metric.rectKey] = `{${x0},${y0},${x1},${y1},hcenter|vcenter}`;
-      values[metric.fontKey] = font.folder;
+      if (metric.fontKey) {
+        values[metric.fontKey] = font.folder;
+      }
       if (metric.negativeSignKey) {
         const negativeSign = temperatureNegativeSignValue(resolution);
         if (negativeSign) {
           values[metric.negativeSignKey] = negativeSign;
+        }
+      }
+      if (metric.id === "temperature") {
+        const controlScale = resolution.width / 416;
+        if (Object.prototype.hasOwnProperty.call(resolution.config, "control_temperature_font")) {
+          values.control_temperature_font = font.folder;
+        }
+        if (Object.prototype.hasOwnProperty.call(resolution.config, "control_temperature_rect")) {
+          values.control_temperature_rect =
+            resolution.config.control_temperature_rect ||
+            `{${Math.round(48 * controlScale)},0,${Math.round(145 * controlScale)},${Math.max(1, Math.round(33 * controlScale))},hcenter|vcenter}`;
+        }
+        const weatherIcon = resolution.icons.find((entry) =>
+          /\/weather\.png$/i.test(entry.path)
+        );
+        if (
+          weatherIcon &&
+          Object.prototype.hasOwnProperty.call(resolution.config, "control_temperature_icon")
+        ) {
+          values.control_temperature_icon = weatherIcon.path
+            .slice(`${resolution.directory}/`.length)
+            .replace(/\//g, "\\");
+          if (Object.prototype.hasOwnProperty.call(resolution.config, "control_temperature_icon_pos")) {
+            values.control_temperature_icon_pos = `{${Math.round(10 * controlScale)},0}`;
+          }
+        }
+        const negativeSign = temperatureNegativeSignValue(resolution);
+        if (
+          negativeSign &&
+          Object.prototype.hasOwnProperty.call(
+            resolution.config,
+            "control_temperature_negative_sign_icon"
+          )
+        ) {
+          values.control_temperature_negative_sign_icon = negativeSign;
         }
       }
     }
@@ -954,11 +1032,38 @@ export function buildMetricStyleOverrides(
         continue;
       }
       values[metric.rectKey] = rect;
-      if (useStudioFolders) {
+      if (useStudioFolders && metric.fontKey) {
         values[metric.fontKey] = METRIC_STUDIO_FOLDERS[metric.id];
       }
-      if (metric.fontColorKey) {
+      if (metric.fontColorKey && style.color) {
         values[metric.fontColorKey] = configHexColor(style.color);
+      }
+      if (metric.id === "temperature") {
+        const controlRect = scaleConfigRectValue(
+          resolution.config.control_temperature_rect ?? "",
+          style.scale
+        );
+        if (controlRect) {
+          values.control_temperature_rect = controlRect;
+        }
+        if (
+          useStudioFolders &&
+          Object.prototype.hasOwnProperty.call(
+            resolution.config,
+            "control_temperature_font"
+          )
+        ) {
+          values.control_temperature_font = METRIC_STUDIO_FOLDERS.temperature;
+        }
+        if (
+          style.color &&
+          Object.prototype.hasOwnProperty.call(
+            resolution.config,
+            "control_temperature_font_color"
+          )
+        ) {
+          values.control_temperature_font_color = configHexColor(style.color);
+        }
       }
     }
     if (Object.keys(values).length > 0) {
@@ -973,7 +1078,8 @@ export async function buildMetricSpriteReplacements(
   details: CorosWatchfaceTemplateDetails,
   styles: WatchfaceMetricStyles,
   fontFamily: string,
-  loadAssets: WatchfaceAssetLoader
+  loadAssets: WatchfaceAssetLoader,
+  typography: WatchfaceTypography = {}
 ): Promise<CorosWatchfaceAssetReplacement[]> {
   const jobs: {
     source: CorosWatchfaceSpriteFile;
@@ -981,7 +1087,7 @@ export async function buildMetricSpriteReplacements(
     digit: number;
     width: number;
     height: number;
-    color: string;
+    color?: string;
     fontFamily: string;
   }[] = [];
   for (const resolution of details.resolutions) {
@@ -1021,7 +1127,11 @@ export async function buildMetricSpriteReplacements(
           job.width,
           job.height,
           job.fontFamily,
-          job.color
+          job.color ??
+            ("digitColor" in typography && typeof typography.digitColor === "string"
+              ? typography.digitColor
+              : "#ffffff"),
+          typography
         )
       : await resizeAndTintSprite(
           assetsByPath.get(job.source.path)?.dataUrl ?? "",
@@ -1083,12 +1193,54 @@ export function buildTimeStyleOverrides(
   return overrides;
 }
 
+/**
+ * The firmware positions each time digit independently, so canvas text
+ * tracking alone cannot alter their gap. Move the high and low slots away
+ * from (or toward) each other to make the editor's digit-spacing setting real
+ * both in preview and in the final archive.
+ */
+export function buildTimeTrackingOverrides(
+  details: CorosWatchfaceTemplateDetails,
+  letterSpacing: number,
+  styles: WatchfaceTimeStyles = {}
+): CorosWatchfaceConfigOverride[] {
+  const normalizedSpacing = Math.max(-0.1, Math.min(0.25, letterSpacing));
+  if (Math.abs(normalizedSpacing) < 0.001) {
+    return [];
+  }
+  const overrides: CorosWatchfaceConfigOverride[] = [];
+  for (const resolution of details.resolutions) {
+    const values: Record<string, string> = {};
+    for (const part of WATCHFACE_TIME_PARTS) {
+      const scale = Math.max(0.5, Math.min(2, styles[part.id]?.scale ?? 1));
+      for (const digit of part.digits) {
+        const position = parseConfigPos(resolution.config[digit.posKey]);
+        const sample = findSpriteFolder(
+          resolution,
+          resolution.config[digit.fontKey]
+        )?.files[0];
+        if (!position || !sample) {
+          continue;
+        }
+        const offset = Math.round((sample.height * scale * normalizedSpacing) / 2);
+        const direction = digit.slot === "high" ? -1 : 1;
+        values[digit.posKey] = `{${position.x + direction * offset},${position.y}}`;
+      }
+    }
+    if (Object.keys(values).length > 0) {
+      overrides.push({ path: `${resolution.directory}/config.txt`, values });
+    }
+  }
+  return overrides;
+}
+
 /** Generates isolated high/low digit folders for customized hours and minutes. */
 export async function buildTimeSpriteReplacements(
   details: CorosWatchfaceTemplateDetails,
   styles: WatchfaceTimeStyles,
   fontFamily: string,
-  loadAssets: WatchfaceAssetLoader
+  loadAssets: WatchfaceAssetLoader,
+  typography: WatchfaceTypography = {}
 ): Promise<CorosWatchfaceAssetReplacement[]> {
   const jobs: {
     source: CorosWatchfaceSpriteFile;
@@ -1096,7 +1248,7 @@ export async function buildTimeSpriteReplacements(
     digit: number;
     width: number;
     height: number;
-    color: string;
+    color?: string;
     fontFamily: string;
   }[] = [];
   for (const resolution of details.resolutions) {
@@ -1140,7 +1292,11 @@ export async function buildTimeSpriteReplacements(
           job.width,
           job.height,
           job.fontFamily,
-          job.color
+          job.color ??
+            ("digitColor" in typography && typeof typography.digitColor === "string"
+              ? typography.digitColor
+              : "#ffffff"),
+          typography
         )
       : await resizeAndTintSprite(
           assetsByPath.get(job.source.path)?.dataUrl ?? "",
@@ -1191,7 +1347,10 @@ export function buildDateStyleOverrides(
 export async function buildDateSpriteReplacements(
   details: CorosWatchfaceTemplateDetails,
   styles: WatchfaceDateStyles,
-  options: Pick<WatchfaceStudioOptions, "fontFamily" | "digitColor" | "tintLabels">,
+  options: Pick<
+    WatchfaceStudioOptions,
+    "fontFamily" | "digitColor" | "tintLabels" | "fontWeight" | "fontStyle" | "letterSpacing"
+  >,
   loadAssets: WatchfaceAssetLoader
 ): Promise<CorosWatchfaceAssetReplacement[]> {
   const jobs: {
@@ -1250,7 +1409,8 @@ export async function buildDateSpriteReplacements(
           job.width,
           job.height,
           job.fontFamily,
-          job.color ?? options.digitColor
+          job.color ?? options.digitColor,
+          options
         )
       : await resizeAndTintSprite(
           asset!.dataUrl,
@@ -1822,6 +1982,7 @@ export async function drawStudioPreview(
     source: PreviewDigitSource | null;
     digit: number;
     partId?: WatchfaceTimePartId;
+    slot?: "high" | "low";
     componentId: string;
   }[] = [];
   const timeKeys: [string, string, string, WatchfaceTimePartId][] = [
@@ -1837,6 +1998,7 @@ export async function drawStudioPreview(
       source,
       digit: Number(digitText),
       partId,
+      slot: posKey.includes("_high_") ? "high" : "low",
       componentId: partId
     });
   }
@@ -2069,7 +2231,8 @@ export async function drawStudioPreview(
           file.width,
           file.height,
           options.fontFamily,
-          options.digitColor
+          options.digitColor,
+          options
         );
         digitSprites.set(file.path, await loadStudioImage(dataUrl));
       }
@@ -2085,7 +2248,8 @@ export async function drawStudioPreview(
           file.width,
           file.height,
           options.fontFamily,
-          options.digitColor
+          options.digitColor,
+          options
         );
         digitSprites.set(file.path, await loadStudioImage(dataUrl));
       }
@@ -2109,33 +2273,47 @@ export async function drawStudioPreview(
       : 1;
     const width = Math.max(1, Math.round(file.width * timeScale));
     const height = Math.max(1, Math.round(file.height * timeScale));
+    const tracking = Math.max(-0.1, Math.min(0.25, options.letterSpacing ?? 0));
+    const trackingOffset = planned.slot
+      ? Math.round((height * tracking) / 2) * (planned.slot === "high" ? -1 : 1)
+      : 0;
     let image = digitSprites.get(file.path) ?? loaded.get(file.path);
     if (timeStyle || componentColor) {
       const cacheKey = `${file.path}|${timeFontFamily}|${timeColor}|${timeScale}`;
       image = styledTimeGlyphs.get(cacheKey);
       if (!image) {
-        const dataUrl = timeFontFamily
-          ? renderDigitSprite(
+        if (timeFontFamily) {
+          image = await loadStudioImage(
+            renderDigitSprite(
               String(planned.digit),
               width,
               height,
               timeFontFamily,
-              timeColor
+              timeColor,
+              options
             )
-          : await resizeAndTintSprite(
+          );
+        } else if (timeStyle?.color || componentColor) {
+          image = await loadStudioImage(
+            await resizeAndTintSprite(
               loadedAssets.get(file.path)?.dataUrl ?? "",
               width,
               height,
               timeColor
-            );
-        image = await loadStudioImage(dataUrl);
-        styledTimeGlyphs.set(cacheKey, image);
+            )
+          );
+        } else {
+          image = loaded.get(file.path);
+        }
+        if (image) {
+          styledTimeGlyphs.set(cacheKey, image);
+        }
       }
     }
     if (image) {
       context.drawImage(
         image,
-        planned.pos.x * scale,
+        (planned.pos.x + trackingOffset) * scale,
         planned.pos.y * scale,
         width * scale,
         height * scale
@@ -2212,7 +2390,8 @@ export async function drawStudioPreview(
           weekWidth,
           weekHeight,
           weekFontFamily,
-          weekColor ?? options.digitColor
+          weekColor ?? options.digitColor,
+          options
         )
       );
     }
@@ -2295,10 +2474,11 @@ export async function drawStudioPreview(
               styledFile.width,
               styledFile.height,
               glyphFontFamily,
-              glyphColor
+              glyphColor,
+              options
             )
           );
-        } else if (metricStyle || dateStyle?.color || componentColor) {
+        } else if (metricStyle?.color || dateStyle?.color || componentColor) {
           image = await loadStudioImage(
             await resizeAndTintSprite(
               loadedAssets.get(file.path)?.dataUrl ?? "",

@@ -21,6 +21,7 @@ import {
   buildStaticSeparatorOverrides,
   buildStudioReplacements,
   buildTimeSpriteReplacements,
+  buildTimeTrackingOverrides,
   buildTimeStyleOverrides,
   getAmPmCapability,
   mergeAssetReplacements,
@@ -67,6 +68,9 @@ export function toStudioOptions(
 ): WatchfaceStudioOptions {
   return {
     fontFamily: design.fontFamily,
+    fontWeight: design.fontWeight,
+    fontStyle: design.fontStyle,
+    letterSpacing: design.letterSpacing,
     digitColor: design.digitColor,
     accentColor: design.accentColor,
     tintLabels: design.tintLabels,
@@ -75,7 +79,8 @@ export function toStudioOptions(
     metricStyles: metricStylesOf(design),
     timeStyles: timeStylesOf(design),
     dateStyles: dateStylesOf(design),
-    layerColors: design.layerColors ?? {}
+    layerColors: design.layerColors ?? {},
+    ampmStyle: design.ampmIndicator
   };
 }
 
@@ -143,8 +148,12 @@ export async function composeWatchfaceReplacements(
   const timeStyleActive = hasEntries(timeStyles);
   const dateStyleActive = hasEntries(dateStyles);
   const layerColorActive = hasEntries(design.layerColors);
+  const typographyActive =
+    Boolean(design.fontFamily) ||
+    Object.values(timeStyles).some((style) => Boolean(style?.fontFamily));
   const ampmStyle = design.ampmIndicator;
-  const ampmActive = Boolean(getAmPmCapability(details) && ampmStyle?.enabled);
+  const ampmSupported = Boolean(getAmPmCapability(details) && ampmStyle);
+  const ampmActive = Boolean(ampmSupported && ampmStyle?.enabled);
 
   const assetReplacements = mergeAssetReplacements(
     studioActive
@@ -155,7 +164,8 @@ export async function composeWatchfaceReplacements(
           metricDetails,
           metricStyles,
           design.fontFamily,
-          loadAssets
+          loadAssets,
+          toStudioOptions(design)
         )
       : [],
     timeStyleActive
@@ -163,7 +173,8 @@ export async function composeWatchfaceReplacements(
           details,
           timeStyles,
           design.fontFamily,
-          loadAssets
+          loadAssets,
+          toStudioOptions(design)
         )
       : [],
     dateStyleActive
@@ -184,16 +195,36 @@ export async function composeWatchfaceReplacements(
     ampmActive ? await buildAmPmSpriteReplacements(details, ampmStyle!, loadAssets) : []
   );
 
+  const timeStyleOverrides = timeStyleActive
+    ? buildTimeStyleOverrides(details, timeStyles, true)
+    : [];
+  const timePositionDetails = applyConfigOverridesToDetails(
+    styledMetricDetails,
+    timeStyleActive ? buildTimeStyleOverrides(details, timeStyles) : []
+  );
+  const timeTrackingOverrides = typographyActive
+    ? buildTimeTrackingOverrides(
+        timePositionDetails,
+        design.letterSpacing ?? 0,
+        timeStyles
+      )
+    : [];
+  const layoutDetails = applyConfigOverridesToDetails(
+    timePositionDetails,
+    timeTrackingOverrides
+  );
+
   const configOverrides = mergeConfigOverrides(
     metricOverrides,
     metricStyleActive ? buildMetricStyleOverrides(metricDetails, metricStyles, true) : [],
-    timeStyleActive ? buildTimeStyleOverrides(details, timeStyles, true) : [],
+    timeStyleOverrides,
     dateStyleActive ? buildDateStyleOverrides(details, dateStyles, true) : [],
+    timeTrackingOverrides,
     buildLayerColorOverrides(details, design.layerColors ?? {}),
     buildStaticSeparatorOverrides(details, design.staticSeparators),
-    ampmActive ? buildAmPmOverrides(details, ampmStyle!) : [],
+    ampmSupported ? buildAmPmOverrides(details, ampmStyle!) : [],
     layoutIsActive(design)
-      ? buildLayoutOverrides(styledMetricDetails, design.layoutOffsets ?? {})
+      ? buildLayoutOverrides(layoutDetails, design.layoutOffsets ?? {})
       : [],
     buildLayerVisibilityOverrides(details, design.layerVisibility ?? {})
   );

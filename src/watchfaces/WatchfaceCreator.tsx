@@ -45,6 +45,7 @@ import {
   buildStaticSeparatorOverrides,
   buildStudioReplacements,
   buildTimeSpriteReplacements,
+  buildTimeTrackingOverrides,
   buildTimeStyleOverrides,
   computeLayoutGroupBounds,
   computeLayoutOffsetLimits,
@@ -74,6 +75,7 @@ import {
   type WatchfaceStaticSeparatorId,
   type WatchfaceStaticSeparators
 } from "./watchfaceStudio";
+import { LocalFontPicker } from "./LocalFontPicker";
 
 interface WatchfaceCreatorProps {
   api: CorosLinkApi;
@@ -85,21 +87,6 @@ interface WatchfaceCreatorProps {
   onError: (message: string) => void;
   onNotice: (message: string) => void;
 }
-
-const DIGIT_FONT_OPTIONS = [
-  "American Typewriter",
-  "Arial Black",
-  "Avenir Next",
-  "Courier New",
-  "DIN Alternate",
-  "Futura",
-  "Georgia",
-  "Gill Sans",
-  "Helvetica Neue",
-  "Impact",
-  "Menlo",
-  "Trebuchet MS"
-];
 
 const PREVIEW_SIZE = 360;
 
@@ -167,6 +154,9 @@ export function WatchfaceCreator({
   );
   const [details, setDetails] = useState<CorosWatchfaceTemplateDetails | null>(null);
   const [fontFamily, setFontFamily] = useState("");
+  const [fontWeight, setFontWeight] = useState(400);
+  const [fontStyle, setFontStyle] = useState<"normal" | "italic">("normal");
+  const [letterSpacing, setLetterSpacing] = useState(0);
   const [digitColor, setDigitColor] = useState("#ffffff");
   const [tintLabels, setTintLabels] = useState(false);
   const [tintIcons, setTintIcons] = useState(false);
@@ -196,6 +186,9 @@ export function WatchfaceCreator({
 
   const studioOptions: WatchfaceStudioOptions = {
     fontFamily,
+    fontWeight,
+    fontStyle,
+    letterSpacing,
     digitColor,
     accentColor,
     tintLabels,
@@ -633,6 +626,9 @@ export function WatchfaceCreator({
     setAccentColor(saved?.accentColor ?? "#51e0b5");
     setZoom(saved?.zoom ?? 1);
     setFontFamily(saved?.fontFamily ?? "");
+    setFontWeight(saved?.fontWeight ?? 400);
+    setFontStyle(saved?.fontStyle ?? "normal");
+    setLetterSpacing(saved?.letterSpacing ?? 0);
     setDigitColor(saved?.digitColor ?? "#ffffff");
     setTintLabels(saved?.tintLabels ?? false);
     setTintIcons(saved?.tintIcons ?? false);
@@ -858,6 +854,9 @@ export function WatchfaceCreator({
         previewDetails,
         {
           fontFamily,
+          fontWeight,
+          fontStyle,
+          letterSpacing,
           digitColor,
           accentColor,
           tintLabels,
@@ -879,6 +878,9 @@ export function WatchfaceCreator({
     backgroundDataUrl,
     previewDetails,
     fontFamily,
+    fontWeight,
+    fontStyle,
+    letterSpacing,
     digitColor,
     accentColor,
     tintLabels,
@@ -964,6 +966,9 @@ export function WatchfaceCreator({
         artwork,
         zoom,
         fontFamily,
+        fontWeight,
+        fontStyle,
+        letterSpacing,
         digitColor,
         tintLabels,
         tintIcons,
@@ -1024,7 +1029,8 @@ export function WatchfaceCreator({
               metricDetails,
               metricStyles,
               fontFamily,
-              loadAssets
+              loadAssets,
+              studioOptions
             )
           : [];
       const timeSpriteReplacements =
@@ -1033,7 +1039,8 @@ export function WatchfaceCreator({
               details,
               timeStyles,
               fontFamily,
-              loadAssets
+              loadAssets,
+              studioOptions
             )
           : [];
       const ampmSpriteReplacements =
@@ -1054,14 +1061,32 @@ export function WatchfaceCreator({
         details && timeStyleActive
           ? buildTimeStyleOverrides(details, timeStyles, true)
           : [];
+      const timePositionOverrides =
+        details && timeStyleActive
+          ? buildTimeStyleOverrides(details, timeStyles)
+          : [];
+      const timePositionDetails = details
+        ? applyConfigOverridesToDetails(details, timePositionOverrides)
+        : null;
+      const timeTrackingOverrides =
+        timePositionDetails && fontFamily
+          ? buildTimeTrackingOverrides(timePositionDetails, letterSpacing, timeStyles)
+          : [];
+      const layoutDetails = styledMetricDetails
+        ? applyConfigOverridesToDetails(
+            styledMetricDetails,
+            [...timePositionOverrides, ...timeTrackingOverrides]
+          )
+        : null;
       const layoutOverrides =
-        styledMetricDetails && layoutActive
-          ? buildLayoutOverrides(styledMetricDetails, layoutOffsets)
+        layoutDetails && layoutActive
+          ? buildLayoutOverrides(layoutDetails, layoutOffsets)
           : [];
       const configOverrides = mergeConfigOverrides(
         metricOverrides,
         exportMetricStyleOverrides,
         exportTimeStyleOverrides,
+        timeTrackingOverrides,
         staticSeparatorOverrides,
         ampmOverrides,
         layoutOverrides
@@ -1323,19 +1348,20 @@ export function WatchfaceCreator({
             {details ? (
               <>
                 <div className="watchface-color-grid">
-                  <label className="field">
-                    Digit font
-                    <select
-                      value={fontFamily}
-                      onChange={(event) => setFontFamily(event.target.value)}
-                      disabled={disabled || creating}
-                    >
-                      <option value="">Keep template digits</option>
-                      {DIGIT_FONT_OPTIONS.map((family) => (
-                        <option key={family} value={family}>{family}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <LocalFontPicker
+                    api={api}
+                    label="Digit font"
+                    value={fontFamily}
+                    emptyLabel="Keep template digits"
+                    disabled={disabled || creating}
+                    onChange={setFontFamily}
+                    typography={{ fontWeight, fontStyle, letterSpacing }}
+                    onTypographyChange={(typography) => {
+                      setFontWeight(typography.fontWeight ?? 400);
+                      setFontStyle(typography.fontStyle ?? "normal");
+                      setLetterSpacing(typography.letterSpacing ?? 0);
+                    }}
+                  />
                   <label className="field">
                     Digit color
                     <span className="watchface-color-control">

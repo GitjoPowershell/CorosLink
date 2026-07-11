@@ -3,6 +3,7 @@ import type { OpenDialogOptions } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { listLocalFontFamilies } from "./fontService";
 import { deleteDownload, getDownloadById, initializeDatabase, listDownloads, markDownloadTransferred, clearDownloadTransferredByFileName } from "./database";
 import { downloadAudio, getBinaryStatus } from "./downloadService";
 import {
@@ -563,6 +564,10 @@ function registerIpcHandlers(): void {
   ipcMain.handle("watch:getStatus", () => getWatchStatus());
 
   ipcMain.handle("watchfaces:getStatus", () => getCorosWatchfaceStatus());
+
+  // Font names are host-local metadata only. Glyph rendering remains in the
+  // renderer, where they are baked into the watchface's PNG sprites.
+  ipcMain.handle("watchfaces:listLocalFontFamilies", () => listLocalFontFamilies());
 
   ipcMain.handle(
     "watchfaces:login",

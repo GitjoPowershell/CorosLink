@@ -59,6 +59,7 @@ import {
 import {
   computeLayoutOffsetLimits,
   drawStudioPreview,
+  getAmPmCapability,
   inferStaticSeparators,
   pickPreviewResolution,
   type WatchfaceDatePartId,
@@ -66,6 +67,7 @@ import {
   type WatchfaceStaticSeparatorId,
   type WatchfaceTimePartId
 } from "./watchfaceStudio";
+import { LocalFontPicker } from "./LocalFontPicker";
 
 interface WatchfaceEditorProps {
   api: CorosLinkApi;
@@ -80,21 +82,6 @@ interface WatchfaceEditorProps {
 }
 
 const PREVIEW_SIZE = 520;
-
-const DIGIT_FONT_OPTIONS = [
-  "American Typewriter",
-  "Arial Black",
-  "Avenir Next",
-  "Courier New",
-  "DIN Alternate",
-  "Futura",
-  "Georgia",
-  "Gill Sans",
-  "Helvetica Neue",
-  "Impact",
-  "Menlo",
-  "Trebuchet MS"
-];
 
 export function WatchfaceEditor({
   api,
@@ -111,7 +98,7 @@ export function WatchfaceEditor({
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const assetCacheRef = useRef(new Map<string, CorosWatchfaceTemplateAsset>());
   const dragRef = useRef<{
-    kind: "layout" | "bgElement" | "sprite" | "staticSeparator";
+    kind: "layout" | "bgElement" | "sprite" | "staticSeparator" | "ampm";
     targetId: string;
     startX: number;
     startY: number;
@@ -166,6 +153,20 @@ export function WatchfaceEditor({
                 current.digitColor
               )
             }));
+          }
+          if (!initialDesign?.ampmIndicator) {
+            const capability = getAmPmCapability(described);
+            if (capability) {
+              setDesign((current) => ({
+                ...current,
+                ampmIndicator: {
+                  enabled: capability.active,
+                  ...capability.defaultPos,
+                  scale: 1,
+                  color: current.digitColor
+                }
+              }));
+            }
           }
         }
       })
@@ -376,6 +377,18 @@ export function WatchfaceEditor({
       return;
     }
     setSelectedId(liveHit.id);
+    if (liveHit.ampmIndicator && design.ampmIndicator) {
+      dragRef.current = {
+        kind: "ampm",
+        targetId: "ampm",
+        startX: point.x,
+        startY: point.y,
+        baseX: design.ampmIndicator.x,
+        baseY: design.ampmIndicator.y
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
     if (liveHit.staticSeparatorId) {
       const separator = design.staticSeparators[liveHit.staticSeparatorId];
       dragRef.current = {
@@ -468,6 +481,26 @@ export function WatchfaceEditor({
       });
       return;
     }
+    if (drag.kind === "ampm") {
+      const capability = details ? getAmPmCapability(details) : null;
+      const style = design.ampmIndicator;
+      if (!capability || !style) {
+        return;
+      }
+      const faceWidth = previewResolution?.width ?? previewWidth;
+      const faceHeight = previewResolution?.height ?? previewWidth;
+      const width = capability.icon.width * style.scale;
+      const height = capability.icon.height * style.scale;
+      updateAmPmIndicator({
+        x: Math.round(
+          Math.max(0, Math.min(faceWidth - width, drag.baseX + point.x - drag.startX))
+        ),
+        y: Math.round(
+          Math.max(0, Math.min(faceHeight - height, drag.baseY + point.y - drag.startY))
+        )
+      });
+      return;
+    }
     const limits = layoutLimits[drag.targetId];
     const fallbackLimit = Math.max(
       previewResolution?.width ?? 800,
@@ -529,6 +562,14 @@ export function WatchfaceEditor({
     }));
   }
 
+  function clearLayerColor(layerId: string) {
+    setDesign((prev) => {
+      const layerColors = { ...prev.layerColors };
+      delete layerColors[layerId];
+      return { ...prev, layerColors };
+    });
+  }
+
   function updateStaticSeparator(
     separatorId: WatchfaceStaticSeparatorId,
     patch: Partial<
@@ -547,18 +588,42 @@ export function WatchfaceEditor({
     }));
   }
 
+  function updateAmPmIndicator(
+    patch: Partial<NonNullable<CorosWatchfaceDesignState["ampmIndicator"]>>
+  ) {
+    setDesign((prev) => ({
+      ...prev,
+      ampmIndicator: {
+        enabled: prev.ampmIndicator?.enabled ?? false,
+        x: prev.ampmIndicator?.x ?? 0,
+        y: prev.ampmIndicator?.y ?? 0,
+        scale: prev.ampmIndicator?.scale ?? 1,
+        color: prev.ampmIndicator?.color ?? prev.digitColor,
+        ...patch
+      }
+    }));
+  }
+
   function setMetricStyle(
     metricId: WatchfaceMetricId,
     patch: { color?: string; scale?: number; fontFamily?: string }
   ) {
     setDesign((prev) => {
-      const current = prev.metricStyles?.[metricId] ?? {
-        color: prev.digitColor,
-        scale: 1
-      };
+      const current = prev.metricStyles?.[metricId] ?? { scale: 1 };
       return {
         ...prev,
         metricStyles: { ...prev.metricStyles, [metricId]: { ...current, ...patch } }
+      };
+    });
+  }
+
+  function clearMetricColor(metricId: WatchfaceMetricId) {
+    setDesign((prev) => {
+      const current = prev.metricStyles?.[metricId] ?? { scale: 1 };
+      const { color: _color, ...style } = current;
+      return {
+        ...prev,
+        metricStyles: { ...prev.metricStyles, [metricId]: style }
       };
     });
   }
@@ -568,10 +633,21 @@ export function WatchfaceEditor({
     patch: { color?: string; scale?: number; fontFamily?: string }
   ) {
     setDesign((prev) => {
-      const current = prev.timeStyles?.[partId] ?? { color: prev.digitColor, scale: 1 };
+      const current = prev.timeStyles?.[partId] ?? { scale: 1 };
       return {
         ...prev,
         timeStyles: { ...prev.timeStyles, [partId]: { ...current, ...patch } }
+      };
+    });
+  }
+
+  function clearTimeColor(partId: WatchfaceTimePartId) {
+    setDesign((prev) => {
+      const current = prev.timeStyles?.[partId] ?? { scale: 1 };
+      const { color: _color, ...style } = current;
+      return {
+        ...prev,
+        timeStyles: { ...prev.timeStyles, [partId]: style }
       };
     });
   }
@@ -588,6 +664,17 @@ export function WatchfaceEditor({
           ...prev.dateStyles,
           [partId]: { ...current, ...patch }
         }
+      };
+    });
+  }
+
+  function clearDateColor(partId: WatchfaceDatePartId) {
+    setDesign((prev) => {
+      const current = prev.dateStyles?.[partId] ?? { scale: 1 };
+      const { color: _color, ...style } = current;
+      return {
+        ...prev,
+        dateStyles: { ...prev.dateStyles, [partId]: style }
       };
     });
   }
@@ -780,6 +867,8 @@ export function WatchfaceEditor({
                       onClick={() => {
                         if (layer.metricId) {
                           setMetricVisible(layer.metricId, !layer.visible);
+                        } else if (layer.ampmIndicator) {
+                          updateAmPmIndicator({ enabled: !layer.visible });
                         } else if (layer.staticSeparatorId) {
                           updateStaticSeparator(layer.staticSeparatorId, {
                             enabled: !layer.visible
@@ -868,6 +957,10 @@ export function WatchfaceEditor({
   );
 
   function renderInspector(layer: EditorLayer) {
+    if (layer.ampmIndicator) {
+      return renderAmPmInspector();
+    }
+
     if (layer.staticSeparatorId) {
       return renderStaticSeparatorInspector(layer.staticSeparatorId);
     }
@@ -924,21 +1017,34 @@ export function WatchfaceEditor({
       return (
         <div className="watchface-inspector-group">
           {renderLayerVisibilityToggle(layer)}
-          <label className="field">
-            Digit font
-            <select
-              value={style?.fontFamily ?? design.fontFamily}
-              onChange={(e) => setTimeStyle(layer.timePartId!, { fontFamily: e.target.value })}
-            >
-              <option value="">Keep template digits</option>
-              {DIGIT_FONT_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
-            </select>
-          </label>
+          <LocalFontPicker
+            api={api}
+            label="Digit font"
+            value={style?.fontFamily ?? design.fontFamily}
+            emptyLabel="Keep template digits"
+            onChange={(fontFamily) =>
+              setTimeStyle(layer.timePartId!, { fontFamily })
+            }
+            typography={{
+              fontWeight: design.fontWeight ?? 400,
+              fontStyle: design.fontStyle ?? "normal",
+              letterSpacing: design.letterSpacing ?? 0
+            }}
+            onTypographyChange={(typography) => patchDesign(typography)}
+          />
           <label className="field">
             Digit color
             <span className="watchface-color-control">
               <input type="color" value={style?.color ?? design.digitColor} onChange={(e) => setTimeStyle(layer.timePartId!, { color: e.target.value })} />
               <code>{style?.color ?? design.digitColor}</code>
+              <button
+                type="button"
+                className="watchface-color-none"
+                disabled={!style?.color}
+                onClick={() => clearTimeColor(layer.timePartId!)}
+              >
+                None
+              </button>
             </span>
           </label>
           <label className="field watchface-zoom-control">
@@ -958,21 +1064,34 @@ export function WatchfaceEditor({
             <input type="checkbox" checked={layer.visible} onChange={(e) => setMetricVisible(layer.metricId!, e.target.checked)} />
             Show this metric
           </label>
-          <label className="field">
-            Digit font
-            <select
-              value={style?.fontFamily ?? design.fontFamily}
-              onChange={(e) => setMetricStyle(layer.metricId!, { fontFamily: e.target.value })}
-            >
-              <option value="">Keep template digits</option>
-              {DIGIT_FONT_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
-            </select>
-          </label>
+          <LocalFontPicker
+            api={api}
+            label="Digit font"
+            value={style?.fontFamily ?? design.fontFamily}
+            emptyLabel="Keep template digits"
+            onChange={(fontFamily) =>
+              setMetricStyle(layer.metricId!, { fontFamily })
+            }
+            typography={{
+              fontWeight: design.fontWeight ?? 400,
+              fontStyle: design.fontStyle ?? "normal",
+              letterSpacing: design.letterSpacing ?? 0
+            }}
+            onTypographyChange={(typography) => patchDesign(typography)}
+          />
           <label className="field">
             Color
             <span className="watchface-color-control">
               <input type="color" value={style?.color ?? design.digitColor} onChange={(e) => setMetricStyle(layer.metricId!, { color: e.target.value })} />
               <code>{style?.color ?? design.digitColor}</code>
+              <button
+                type="button"
+                className="watchface-color-none"
+                disabled={!style?.color}
+                onClick={() => clearMetricColor(layer.metricId!)}
+              >
+                None
+              </button>
             </span>
           </label>
           <label className="field watchface-zoom-control">
@@ -995,16 +1114,19 @@ export function WatchfaceEditor({
       return (
         <div className="watchface-inspector-group">
           {renderLayerVisibilityToggle(layer)}
-          <label className="field">
-            Font
-            <select
-              value={style?.fontFamily ?? design.fontFamily}
-              onChange={(e) => setDateStyle(partId, { fontFamily: e.target.value })}
-            >
-              <option value="">Keep template font</option>
-              {DIGIT_FONT_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
-            </select>
-          </label>
+          <LocalFontPicker
+            api={api}
+            label="Font"
+            value={style?.fontFamily ?? design.fontFamily}
+            emptyLabel="Keep template font"
+            onChange={(fontFamily) => setDateStyle(partId, { fontFamily })}
+            typography={{
+              fontWeight: design.fontWeight ?? 400,
+              fontStyle: design.fontStyle ?? "normal",
+              letterSpacing: design.letterSpacing ?? 0
+            }}
+            onTypographyChange={(typography) => patchDesign(typography)}
+          />
           <label className="field">
             Color
             <span className="watchface-color-control">
@@ -1014,6 +1136,14 @@ export function WatchfaceEditor({
                 onChange={(e) => setDateStyle(partId, { color: e.target.value })}
               />
               <code>{style?.color ?? design.digitColor}</code>
+              <button
+                type="button"
+                className="watchface-color-none"
+                disabled={!style?.color}
+                onClick={() => clearDateColor(partId)}
+              >
+                None
+              </button>
             </span>
           </label>
           <label className="field watchface-zoom-control">
@@ -1122,6 +1252,14 @@ export function WatchfaceEditor({
                     ? design.accentColor
                     : design.digitColor)}
               </code>
+              <button
+                type="button"
+                className="watchface-color-none"
+                disabled={!design.layerColors?.[layer.layoutGroupId]}
+                onClick={() => clearLayerColor(layer.layoutGroupId!)}
+              >
+                None
+              </button>
             </span>
           </label>
         ) : null}
@@ -1134,7 +1272,12 @@ export function WatchfaceEditor({
   }
 
   function renderLayerVisibilityToggle(layer: EditorLayer) {
-    if (!layer.canHide || layer.staticSeparatorId || layer.metricId) {
+    if (
+      !layer.canHide ||
+      layer.ampmIndicator ||
+      layer.staticSeparatorId ||
+      layer.metricId
+    ) {
       return null;
     }
     const setVisible = (visible: boolean) => {
@@ -1294,18 +1437,15 @@ export function WatchfaceEditor({
           />
           Show {separatorId === "colon" ? "time colon" : "date slash"}
         </label>
-        <label className="field">
-          Font
-          <select
-            value={separator.fontFamily ?? design.fontFamily}
-            onChange={(e) =>
-              updateStaticSeparator(separatorId, { fontFamily: e.target.value })
-            }
-          >
-            <option value="">System font</option>
-            {DIGIT_FONT_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
-          </select>
-        </label>
+        <LocalFontPicker
+          api={api}
+          label="Font"
+          value={separator.fontFamily ?? design.fontFamily}
+          emptyLabel="System font"
+          onChange={(fontFamily) =>
+            updateStaticSeparator(separatorId, { fontFamily })
+          }
+        />
         <label className="field watchface-zoom-control">
           Size <span>{separator.size}px</span>
           <input
@@ -1330,6 +1470,16 @@ export function WatchfaceEditor({
               onChange={(e) => updateStaticSeparator(separatorId, { color: e.target.value })}
             />
             <code>{separator.color}</code>
+            <button
+              type="button"
+              className="watchface-color-none"
+              disabled={separator.color === design.digitColor}
+              onClick={() =>
+                updateStaticSeparator(separatorId, { color: design.digitColor })
+              }
+            >
+              None
+            </button>
           </span>
         </label>
         <div className="watchface-inspector-position">
@@ -1375,6 +1525,147 @@ export function WatchfaceEditor({
         </div>
         <p className="watchface-studio-summary">
           Enable it, then drag its outline on the face or use the exact controls.
+        </p>
+      </div>
+    );
+  }
+
+  function renderAmPmInspector() {
+    const capability = details ? getAmPmCapability(details) : null;
+    const indicator = design.ampmIndicator;
+    if (!capability || !indicator) {
+      return null;
+    }
+    const faceWidth = previewResolution?.width ?? previewWidth;
+    const faceHeight = previewResolution?.height ?? previewWidth;
+    const boundsForScale = (scale: number) => ({
+      width: capability.icon.width * scale,
+      height: capability.icon.height * scale
+    });
+    const setPosition = (x: number, y: number, scale = indicator.scale) => {
+      const { width, height } = boundsForScale(scale);
+      updateAmPmIndicator({
+        x: Math.round(Math.max(0, Math.min(faceWidth - width, x))),
+        y: Math.round(Math.max(0, Math.min(faceHeight - height, y)))
+      });
+    };
+    const alignX = (position: "start" | "center" | "end") => {
+      const { width } = boundsForScale(indicator.scale);
+      setPosition(
+        position === "start"
+          ? 0
+          : position === "end"
+            ? faceWidth - width
+            : (faceWidth - width) / 2,
+        indicator.y
+      );
+    };
+    const alignY = (position: "start" | "center" | "end") => {
+      const { height } = boundsForScale(indicator.scale);
+      setPosition(
+        indicator.x,
+        position === "start"
+          ? 0
+          : position === "end"
+            ? faceHeight - height
+            : (faceHeight - height) / 2
+      );
+    };
+    return (
+      <div className="watchface-inspector-group">
+        <label className="watchface-studio-toggle">
+          <input
+            type="checkbox"
+            checked={indicator.enabled}
+            onChange={(event) =>
+              updateAmPmIndicator({ enabled: event.target.checked })
+            }
+          />
+          Show AM/PM indicator
+        </label>
+        <label className="field">
+          Color
+          <span className="watchface-color-control">
+            <input
+              type="color"
+              value={indicator.color}
+              onChange={(event) =>
+                updateAmPmIndicator({ color: event.target.value })
+              }
+            />
+            <code>{indicator.color}</code>
+            <button
+              type="button"
+              className="watchface-color-none"
+              disabled={indicator.color === design.digitColor}
+              onClick={() => updateAmPmIndicator({ color: design.digitColor })}
+            >
+              None
+            </button>
+          </span>
+        </label>
+        <label className="field watchface-zoom-control">
+          Size <span>{indicator.scale.toFixed(2)}×</span>
+          <input
+            type="range"
+            min="0.5"
+            max="2"
+            step="0.02"
+            value={indicator.scale}
+            onChange={(event) => {
+              const scale = Number(event.target.value);
+              updateAmPmIndicator({ scale });
+              setPosition(indicator.x, indicator.y, scale);
+            }}
+          />
+        </label>
+        <div className="watchface-inspector-position">
+          <span>Exact position</span>
+          <div className="watchface-position-inputs">
+            <label>
+              X
+              <input
+                type="number"
+                min="0"
+                max={faceWidth}
+                value={indicator.x}
+                onChange={(event) =>
+                  setPosition(Number(event.target.value) || 0, indicator.y)
+                }
+              />
+            </label>
+            <label>
+              Y
+              <input
+                type="number"
+                min="0"
+                max={faceHeight}
+                value={indicator.y}
+                onChange={(event) =>
+                  setPosition(indicator.x, Number(event.target.value) || 0)
+                }
+              />
+            </label>
+          </div>
+          <span>Align to face</span>
+          <div className="watchface-align-grid">
+            <button type="button" onClick={() => alignX("start")}>Left</button>
+            <button type="button" onClick={() => alignX("center")}>Center</button>
+            <button type="button" onClick={() => alignX("end")}>Right</button>
+            <button type="button" onClick={() => alignY("start")}>Top</button>
+            <button type="button" onClick={() => alignY("center")}>Middle</button>
+            <button type="button" onClick={() => alignY("end")}>Bottom</button>
+          </div>
+          <span>Fine tune · 1 px</span>
+          <div className="watchface-nudge-pad">
+            <button type="button" onClick={() => setPosition(indicator.x, indicator.y - 1)} aria-label="Nudge up">↑</button>
+            <button type="button" onClick={() => setPosition(indicator.x - 1, indicator.y)} aria-label="Nudge left">←</button>
+            <button type="button" onClick={() => setPosition(indicator.x + 1, indicator.y)} aria-label="Nudge right">→</button>
+            <button type="button" onClick={() => setPosition(indicator.x, indicator.y + 1)} aria-label="Nudge down">↓</button>
+          </div>
+        </div>
+        <p className="watchface-studio-summary">
+          The watch automatically swaps this sprite between AM and PM in 12-hour mode.
         </p>
       </div>
     );
@@ -1481,13 +1772,13 @@ export function WatchfaceEditor({
                 <code>{element.color}</code>
               </span>
             </label>
-            <label className="field">
-              Font
-              <select value={element.fontFamily} onChange={(e) => set({ fontFamily: e.target.value })}>
-                <option value="">System</option>
-                {DIGIT_FONT_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
-              </select>
-            </label>
+            <LocalFontPicker
+              api={api}
+              label="Font"
+              value={element.fontFamily}
+              emptyLabel="System font"
+              onChange={(fontFamily) => set({ fontFamily })}
+            />
             <label className="field watchface-zoom-control">
               Size <span>{element.fontSize}px</span>
               <input type="range" min="12" max="200" step="2" value={element.fontSize} onChange={(e) => set({ fontSize: Number(e.target.value) })} />

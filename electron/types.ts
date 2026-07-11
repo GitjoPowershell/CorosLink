@@ -362,13 +362,18 @@ export interface CorosWatchfaceDesignState {
   artwork: CorosWatchfaceArtwork | null;
   zoom: number;
   fontFamily: string;
+  /** Typography settings for rasterized digit and date sprites. */
+  fontWeight?: number;
+  fontStyle?: "normal" | "italic";
+  /** Character spacing as a fraction of the font size (for example 0.04). */
+  letterSpacing?: number;
   digitColor: string;
   tintLabels: boolean;
   tintIcons: boolean;
   previewComplication: string;
   metricChanges: Record<string, boolean>;
-  metricStyles: Record<string, { color: string; scale: number; fontFamily?: string }>;
-  timeStyles: Record<string, { color: string; scale: number; fontFamily?: string }>;
+  metricStyles: Record<string, { color?: string; scale: number; fontFamily?: string }>;
+  timeStyles: Record<string, { color?: string; scale: number; fontFamily?: string }>;
   /** Weekday/month/day scaling; absent in projects saved before resizing. */
   dateStyles?: Record<
     string,
