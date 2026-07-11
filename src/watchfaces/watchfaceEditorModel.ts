@@ -3,13 +3,22 @@ import type {
   CorosWatchfaceTemplateDetails
 } from "../../electron/types";
 import {
+  applyConfigOverridesToDetails,
   applyLayoutToDetails,
+  buildDateStyleOverrides,
+  buildMetricStyleOverrides,
+  buildTimeStyleOverrides,
   computeLayoutGroupBounds,
   getFixedMetricCapabilities,
+  mergeConfigOverrides,
   pickPreviewResolution,
   WATCHFACE_LAYOUT_GROUPS,
+  type WatchfaceDateStyles,
   type WatchfaceLayoutGroupBounds,
   type WatchfaceMetricId,
+  type WatchfaceMetricStyles,
+  type WatchfaceStaticSeparatorId,
+  type WatchfaceTimeStyles,
   type WatchfaceTimePartId
 } from "./watchfaceStudio";
 
@@ -55,6 +64,8 @@ export interface EditorLayer {
   timePartId?: WatchfaceTimePartId;
   /** Set for imported sprite layers. */
   spriteId?: string;
+  /** Set for editor-authored colon and date-slash layers. */
+  staticSeparatorId?: WatchfaceStaticSeparatorId;
   visible: boolean;
   /** Whether the user may hide/remove this layer. */
   canHide: boolean;
@@ -114,6 +125,9 @@ function capabilitiesForGroup(groupId: string): EditorLayerCapabilities {
   if (METRIC_IDS.has(groupId as WatchfaceMetricId)) {
     return { position: true, color: true, scale: true, font: false };
   }
+  if (groupId === "weekday" || groupId === "dateMonth" || groupId === "dateDay") {
+    return { position: true, color: false, scale: true, font: false };
+  }
   return { position: true, color: false, scale: false, font: false };
 }
 
@@ -148,7 +162,21 @@ export function deriveEditorLayers(
   details: CorosWatchfaceTemplateDetails,
   design: CorosWatchfaceDesignState
 ): EditorLayer[] {
-  const offsetDetails = applyLayoutToDetails(details, design.layoutOffsets ?? {});
+  const styledDetails = applyConfigOverridesToDetails(
+    details,
+    mergeConfigOverrides(
+      buildMetricStyleOverrides(
+        details,
+        (design.metricStyles ?? {}) as WatchfaceMetricStyles
+      ),
+      buildTimeStyleOverrides(details, (design.timeStyles ?? {}) as WatchfaceTimeStyles),
+      buildDateStyleOverrides(details, (design.dateStyles ?? {}) as WatchfaceDateStyles)
+    )
+  );
+  const offsetDetails = applyLayoutToDetails(
+    styledDetails,
+    design.layoutOffsets ?? {}
+  );
   const resolution = pickPreviewResolution(offsetDetails);
   const boundsById = new Map<string, WatchfaceLayoutGroupBounds>();
   if (resolution) {
@@ -199,13 +227,50 @@ export function deriveEditorLayers(
       label: labelForGroup(groupId),
       layoutGroupId: groupId,
       ...(groupId in TIME_GROUP_PARTS ? { timePartId: TIME_GROUP_PARTS[groupId] } : {}),
-      visible: true,
-      canHide: false,
+      visible: design.layerVisibility?.[groupId] ?? true,
+      canHide: true,
       present: true,
       bounds,
       capabilities: capabilitiesForGroup(groupId)
     });
   }
+
+  const staticSeparatorLayers: EditorLayer[] = [];
+  for (const [staticSeparatorId, id, label] of [
+    ["colon", "staticColon", "Time colon"],
+    ["dateSlash", "staticDateSlash", "Date slash"]
+  ] as const) {
+    const separator = design.staticSeparators?.[staticSeparatorId];
+    const visible = Boolean(separator?.enabled);
+    const width = separator ? Math.max(24, separator.size * 0.65) : 24;
+    const height = separator ? Math.max(24, separator.size * 1.15) : 24;
+    staticSeparatorLayers.push({
+      id,
+      kind: "separators",
+      label,
+      staticSeparatorId,
+      visible,
+      canHide: true,
+      present: true,
+      bounds: visible && separator
+        ? {
+            id,
+            label,
+            x0: separator.x - width / 2,
+            y0: separator.y - height / 2,
+            x1: separator.x + width / 2,
+            y1: separator.y + height / 2
+          }
+        : null,
+      capabilities: { position: true, color: true, scale: true, font: true }
+    });
+  }
+  const separatorIndex = layers.findIndex((layer) => layer.id === "separators");
+  layers.splice(
+    separatorIndex >= 0 ? separatorIndex + 1 : Math.min(2, layers.length),
+    0,
+    ...staticSeparatorLayers
+  );
 
   for (const sprite of design.designSprites ?? []) {
     // Sprites are drawn centered on (x, y); match the guided creator's
@@ -222,7 +287,7 @@ export function deriveEditorLayers(
       kind: "customSprite",
       label: "Imported sprite",
       spriteId: sprite.id,
-      visible: true,
+      visible: sprite.visible !== false,
       canHide: true,
       present: true,
       bounds: {

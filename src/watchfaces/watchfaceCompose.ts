@@ -9,6 +9,9 @@ import {
   applyLayoutToDetails,
   buildAmPmOverrides,
   buildAmPmSpriteReplacements,
+  buildDateSpriteReplacements,
+  buildDateStyleOverrides,
+  buildLayerVisibilityOverrides,
   buildLayoutOverrides,
   buildMetricOverrides,
   buildMetricSpriteReplacements,
@@ -21,6 +24,7 @@ import {
   mergeAssetReplacements,
   mergeConfigOverrides,
   type WatchfaceAssetLoader,
+  type WatchfaceDateStyles,
   type WatchfaceMetricStyles,
   type WatchfaceStudioOptions,
   type WatchfaceTimeStyles
@@ -51,6 +55,10 @@ function timeStylesOf(design: CorosWatchfaceDesignState): WatchfaceTimeStyles {
   return (design.timeStyles ?? {}) as WatchfaceTimeStyles;
 }
 
+function dateStylesOf(design: CorosWatchfaceDesignState): WatchfaceDateStyles {
+  return (design.dateStyles ?? {}) as WatchfaceDateStyles;
+}
+
 /** Preview options mirror WatchfaceCreator so both views render identically. */
 export function toStudioOptions(
   design: CorosWatchfaceDesignState
@@ -63,7 +71,8 @@ export function toStudioOptions(
     tintIcons: design.tintIcons,
     previewComplication: design.previewComplication as WatchfaceStudioOptions["previewComplication"],
     metricStyles: metricStylesOf(design),
-    timeStyles: timeStylesOf(design)
+    timeStyles: timeStylesOf(design),
+    dateStyles: dateStylesOf(design)
   };
 }
 
@@ -80,15 +89,20 @@ export function deriveDesignDetails(
   const componentStyleOverrides = mergeConfigOverrides(
     buildMetricStyleOverrides(metricDetails, metricStylesOf(design)),
     buildTimeStyleOverrides(metricDetails, timeStylesOf(design)),
+    buildDateStyleOverrides(metricDetails, dateStylesOf(design)),
     buildStaticSeparatorOverrides(details, design.staticSeparators)
   );
   const styledMetricDetails = applyConfigOverridesToDetails(
     metricDetails,
     componentStyleOverrides
   );
-  const previewDetails = applyLayoutToDetails(
+  const laidOutDetails = applyLayoutToDetails(
     styledMetricDetails,
     design.layoutOffsets ?? {}
+  );
+  const previewDetails = applyConfigOverridesToDetails(
+    laidOutDetails,
+    buildLayerVisibilityOverrides(details, design.layerVisibility ?? {})
   );
   return { metricOverrides, metricDetails, styledMetricDetails, previewDetails };
 }
@@ -117,11 +131,13 @@ export async function composeWatchfaceReplacements(
     deriveDesignDetails(details, design);
   const metricStyles = metricStylesOf(design);
   const timeStyles = timeStylesOf(design);
+  const dateStyles = dateStylesOf(design);
 
   const studioActive =
     Boolean(design.fontFamily) || design.tintLabels || design.tintIcons;
   const metricStyleActive = hasEntries(metricStyles);
   const timeStyleActive = hasEntries(timeStyles);
+  const dateStyleActive = hasEntries(dateStyles);
   const ampmStyle = design.ampmIndicator;
   const ampmActive = Boolean(getAmPmCapability(details) && ampmStyle?.enabled);
 
@@ -145,6 +161,14 @@ export async function composeWatchfaceReplacements(
           loadAssets
         )
       : [],
+    dateStyleActive
+      ? await buildDateSpriteReplacements(
+          details,
+          dateStyles,
+          toStudioOptions(design),
+          loadAssets
+        )
+      : [],
     ampmActive ? await buildAmPmSpriteReplacements(details, ampmStyle!, loadAssets) : []
   );
 
@@ -152,11 +176,13 @@ export async function composeWatchfaceReplacements(
     metricOverrides,
     metricStyleActive ? buildMetricStyleOverrides(metricDetails, metricStyles, true) : [],
     timeStyleActive ? buildTimeStyleOverrides(details, timeStyles, true) : [],
+    dateStyleActive ? buildDateStyleOverrides(details, dateStyles, true) : [],
     buildStaticSeparatorOverrides(details, design.staticSeparators),
     ampmActive ? buildAmPmOverrides(details, ampmStyle!) : [],
     layoutIsActive(design)
       ? buildLayoutOverrides(styledMetricDetails, design.layoutOffsets ?? {})
-      : []
+      : [],
+    buildLayerVisibilityOverrides(details, design.layerVisibility ?? {})
   );
 
   return { assetReplacements, configOverrides };

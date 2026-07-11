@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import {
   applyConfigOverridesToDetails,
+  buildDateStyleOverrides,
+  buildLayerVisibilityOverrides,
   buildLayoutOverrides,
   buildMetricOverrides,
   buildMetricStyleOverrides,
@@ -19,6 +21,14 @@ import {
 function digitFiles(width, height, directory, folder) {
   return Array.from({ length: 10 }, (_, digit) => ({
     path: `${directory}/${folder}/${String(digit).padStart(2, "0")}.png`,
+    width,
+    height
+  }));
+}
+
+function weekFiles(width, height, directory, folder) {
+  return Array.from({ length: 7 }, (_, day) => ({
+    path: `${directory}/${folder}/${String(day).padStart(2, "0")}.png`,
     width,
     height
   }));
@@ -51,8 +61,11 @@ function resolution(width, digitWidth, digitHeight) {
       time_minute_low_pos: `{${Math.round(width * 0.425)},${Math.round(width * 0.125)}}`,
       time_minute_low_font: "13x19",
       english_date_week_rect: `{${Math.round(width * 0.1)},${Math.round(width * 0.4)},${Math.round(width * 0.3)},${Math.round(width * 0.48)},hcenter|vcenter}`,
+      english_date_week_font: "english_week",
       english_date_month_rect: `{${Math.round(width * 0.4)},${Math.round(width * 0.4)},${Math.round(width * 0.48)},${Math.round(width * 0.48)},hcenter|vcenter}`,
+      english_date_month_font: "13x19",
       english_date_day_rect: `{${Math.round(width * 0.5)},${Math.round(width * 0.4)},${Math.round(width * 0.58)},${Math.round(width * 0.48)},hcenter|vcenter}`,
+      english_date_day_font: "13x19",
       rect_control1_pos: `{${Math.round(width * 0.125)},${Math.round(width * 0.25)}}`,
       control_hr_rect: `{${Math.round(width * 0.2)},0,${Math.round(width * 0.36)},${digitHeight},hcenter|vcenter}`,
       control_hr_font: "13x19",
@@ -66,6 +79,12 @@ function resolution(width, digitWidth, digitHeight) {
         kind: "digits",
         aod: false,
         files: digitFiles(digitWidth, digitHeight, directory, "13x19")
+      },
+      {
+        folder: "english_week",
+        kind: "week",
+        aod: false,
+        files: weekFiles(digitWidth * 3, digitHeight, directory, "english_week")
       }
     ],
     icons: [
@@ -191,6 +210,33 @@ assert.equal(fullTimeStyle?.values.time_hour_high_pos, "{74,84}");
 assert.equal(fullTimeStyle?.values.time_hour_low_pos, "{164,84}");
 assert.equal(fullTimeStyle?.values.time_hour_high_font, "cl_hh");
 assert.equal(fullTimeStyle?.values.time_hour_low_font, "cl_hl");
+const dateStyleOverrides = buildDateStyleOverrides(
+  withMetrics,
+  {
+    weekday: { scale: 1.25 },
+    dateMonth: { scale: 1.5 },
+    dateDay: { scale: 0.75 }
+  },
+  true
+);
+const fullDateStyle = dateStyleOverrides.find((entry) =>
+  entry.path.includes("800x800")
+);
+assert.equal(
+  fullDateStyle?.values.english_date_week_rect,
+  "{60,312,260,392,hcenter|vcenter}"
+);
+assert.equal(fullDateStyle?.values.english_date_week_font, "cl_weekday");
+assert.equal(
+  fullDateStyle?.values.english_date_month_rect,
+  "{304,304,400,400,hcenter|vcenter}"
+);
+assert.equal(fullDateStyle?.values.english_date_month_font, "cl_date_month");
+assert.equal(
+  fullDateStyle?.values.english_date_day_rect,
+  "{408,328,456,376,hcenter|vcenter}"
+);
+assert.equal(fullDateStyle?.values.english_date_day_font, "cl_date_day");
 const fullBounds = computeLayoutGroupBounds(withMetrics.resolutions[1]);
 assert.deepEqual(fullBounds.find((entry) => entry.id === "separators"), {
   id: "separators",
@@ -248,6 +294,19 @@ assert.equal(
   "{75,310,144,343,hcenter|vcenter}"
 );
 assert.equal(shiftedCompact?.values.rect_control1_pos, "{62,120}");
+
+const visibilityOverrides = buildLayerVisibilityOverrides(withMetrics, {
+  hours: false,
+  weekday: false,
+  complication: false
+});
+const hiddenFull = visibilityOverrides.find((entry) =>
+  entry.path.includes("800x800")
+);
+assert.equal(hiddenFull?.values.time_hour_high_pos, "");
+assert.equal(hiddenFull?.values.time_hour_low_pos, "");
+assert.equal(hiddenFull?.values.english_date_week_rect, "");
+assert.equal(hiddenFull?.values.rect_control1_pos, "");
 
 const merged = mergeConfigOverrides(metricOverrides, layoutOverrides);
 assert.equal(merged.length, 2);

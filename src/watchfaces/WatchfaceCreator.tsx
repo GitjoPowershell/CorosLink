@@ -351,7 +351,7 @@ export function WatchfaceCreator({
         y1: ampmStyle.y + ampmCapability.icon.height * ampmScale
       });
     }
-    const spriteBounds = designSprites.map((sprite) => {
+    const spriteBounds = designSprites.filter((sprite) => sprite.visible !== false).map((sprite) => {
       const width = sprite.width * sprite.scale;
       const height = sprite.height * sprite.scale;
       const radians = (sprite.rotation * Math.PI) / 180;
@@ -745,6 +745,9 @@ export function WatchfaceCreator({
 
       const separatorScale = 800 / (previewResolution?.width ?? 800);
       for (const sprite of designSprites) {
+        if (sprite.visible === false) {
+          continue;
+        }
         const spriteImage = spriteImages.get(sprite.id);
         if (!spriteImage) {
           continue;

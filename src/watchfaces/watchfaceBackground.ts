@@ -38,12 +38,14 @@ export function makeDefaultDesign(): CorosWatchfaceDesignState {
     metricChanges: {},
     metricStyles: {},
     timeStyles: {},
+    dateStyles: {},
     staticSeparators: {
       colon: { ...DEFAULT_STATIC_SEPARATORS.colon },
       dateSlash: { ...DEFAULT_STATIC_SEPARATORS.dateSlash }
     },
     ampmIndicator: { ...DEFAULT_AMPM_STYLE },
     layoutOffsets: {},
+    layerVisibility: {},
     designSprites: []
   };
 }
@@ -104,6 +106,9 @@ export async function renderDesignBackground(
   const separatorScale = size / (previewWidth || size);
 
   for (const sprite of design.designSprites ?? []) {
+    if (sprite.visible === false) {
+      continue;
+    }
     const spriteImage = await loadStudioImage(sprite.dataUrl).catch(() => undefined);
     if (!spriteImage) {
       continue;
@@ -127,8 +132,9 @@ export async function renderDesignBackground(
     if (!separator?.enabled) {
       continue;
     }
-    const family = design.fontFamily
-      ? `"${design.fontFamily.replace(/["\\]/g, "")}"`
+    const separatorFont = separator.fontFamily ?? design.fontFamily;
+    const family = separatorFont
+      ? `"${separatorFont.replace(/["\\]/g, "")}"`
       : "system-ui, sans-serif";
     context.font = `700 ${Math.round(separator.size * separatorScale)}px ${family}`;
     context.fillStyle = separator.color;

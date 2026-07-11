@@ -315,7 +315,7 @@ export function WatchfacesView({ api }: WatchfacesViewProps) {
   }
 
   return (
-    <div className="stack watchfaces-view">
+    <div className={`stack watchfaces-view${editorMode ? " is-editor-mode" : ""}`}>
       <section className="panel watchfaces-hero">
         <div>
           <p className="eyebrow">Experimental desktop hand-off</p>

@@ -288,6 +288,8 @@ export interface CorosWatchfaceDesignSprite {
   y: number;
   scale: number;
   rotation: number;
+  /** Absent means visible for projects saved before layer toggles. */
+  visible?: boolean;
 }
 
 /** A two-stop linear gradient fill, angle in degrees clockwise from +x. */
@@ -363,11 +365,20 @@ export interface CorosWatchfaceDesignState {
   tintIcons: boolean;
   previewComplication: string;
   metricChanges: Record<string, boolean>;
-  metricStyles: Record<string, { color: string; scale: number }>;
-  timeStyles: Record<string, { color: string; scale: number }>;
+  metricStyles: Record<string, { color: string; scale: number; fontFamily?: string }>;
+  timeStyles: Record<string, { color: string; scale: number; fontFamily?: string }>;
+  /** Weekday/month/day scaling; absent in projects saved before resizing. */
+  dateStyles?: Record<string, { scale: number; fontFamily?: string }>;
   staticSeparators: Record<
     "colon" | "dateSlash",
-    { enabled: boolean; x: number; y: number; size: number; color: string }
+    {
+      enabled: boolean;
+      x: number;
+      y: number;
+      size: number;
+      color: string;
+      fontFamily?: string;
+    }
   >;
   /** AM/PM indicator styling; absent in projects saved before the feature. */
   ampmIndicator?: {
@@ -378,6 +389,8 @@ export interface CorosWatchfaceDesignState {
     color: string;
   };
   layoutOffsets: Record<string, { dx: number; dy: number }>;
+  /** Visibility overrides for firmware-backed editor layers. */
+  layerVisibility?: Record<string, boolean>;
   designSprites: CorosWatchfaceDesignSprite[];
   /**
    * Freeform vector shapes baked into the background PNG (800px space).

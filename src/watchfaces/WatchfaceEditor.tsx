@@ -57,9 +57,13 @@ import {
   createBackgroundElement
 } from "./watchfaceBackgroundElements";
 import {
+  computeLayoutOffsetLimits,
   drawStudioPreview,
+  inferStaticSeparators,
   pickPreviewResolution,
+  type WatchfaceDatePartId,
   type WatchfaceMetricId,
+  type WatchfaceStaticSeparatorId,
   type WatchfaceTimePartId
 } from "./watchfaceStudio";
 
@@ -75,7 +79,7 @@ interface WatchfaceEditorProps {
   onNotice: (message: string) => void;
 }
 
-const PREVIEW_SIZE = 400;
+const PREVIEW_SIZE = 520;
 
 const DIGIT_FONT_OPTIONS = [
   "American Typewriter",
@@ -107,7 +111,7 @@ export function WatchfaceEditor({
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const assetCacheRef = useRef(new Map<string, CorosWatchfaceTemplateAsset>());
   const dragRef = useRef<{
-    kind: "layout" | "bgElement" | "sprite";
+    kind: "layout" | "bgElement" | "sprite" | "staticSeparator";
     targetId: string;
     startX: number;
     startY: number;
@@ -154,6 +158,15 @@ export function WatchfaceEditor({
       .then((described) => {
         if (!cancelled) {
           setDetails(described);
+          if (!initialDesign) {
+            setDesign((current) => ({
+              ...current,
+              staticSeparators: inferStaticSeparators(
+                described,
+                current.digitColor
+              )
+            }));
+          }
         }
       })
       .catch((caught) => {
@@ -164,17 +177,24 @@ export function WatchfaceEditor({
     return () => {
       cancelled = true;
     };
-  }, [api, onError, starterArchive.archiveId]);
+  }, [api, initialDesign, onError, starterArchive.archiveId]);
 
-  const previewDetails = useMemo(
-    () => (details ? deriveDesignDetails(details, design).previewDetails : null),
+  const designDetails = useMemo(
+    () => (details ? deriveDesignDetails(details, design) : null),
     [details, design]
   );
+  const previewDetails = designDetails?.previewDetails ?? null;
   const previewResolution = useMemo(
     () => (previewDetails ? pickPreviewResolution(previewDetails) : null),
     [previewDetails]
   );
   const previewWidth = previewResolution?.width ?? 800;
+  const layoutLimits = useMemo(() => {
+    const base = designDetails
+      ? pickPreviewResolution(designDetails.styledMetricDetails)
+      : null;
+    return base ? computeLayoutOffsetLimits(base) : {};
+  }, [designDetails]);
   const layers = useMemo(
     () => (details ? deriveEditorLayers(details, design) : []),
     [details, design]
@@ -356,6 +376,19 @@ export function WatchfaceEditor({
       return;
     }
     setSelectedId(liveHit.id);
+    if (liveHit.staticSeparatorId) {
+      const separator = design.staticSeparators[liveHit.staticSeparatorId];
+      dragRef.current = {
+        kind: "staticSeparator",
+        targetId: liveHit.staticSeparatorId,
+        startX: point.x,
+        startY: point.y,
+        baseX: separator.x,
+        baseY: separator.y
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
     if (liveHit.kind === "customSprite" && liveHit.spriteId) {
       const sprite = (design.designSprites ?? []).find((s) => s.id === liveHit.spriteId);
       if (sprite) {
@@ -411,9 +444,47 @@ export function WatchfaceEditor({
       });
       return;
     }
-    const clamp = (v: number) => Math.max(-400, Math.min(400, Math.round(v)));
-    const dx = clamp(drag.baseX + point.x - drag.startX);
-    const dy = clamp(drag.baseY + point.y - drag.startY);
+    if (drag.kind === "staticSeparator") {
+      const separatorId = drag.targetId as WatchfaceStaticSeparatorId;
+      const separator = design.staticSeparators[separatorId];
+      const halfWidth = Math.max(24, separator.size * 0.65) / 2;
+      const halfHeight = Math.max(24, separator.size * 1.15) / 2;
+      updateStaticSeparator(separatorId, {
+        x: Math.round(
+          Math.max(
+            halfWidth,
+            Math.min(previewWidth - halfWidth, drag.baseX + point.x - drag.startX)
+          )
+        ),
+        y: Math.round(
+          Math.max(
+            halfHeight,
+            Math.min(
+              (previewResolution?.height ?? previewWidth) - halfHeight,
+              drag.baseY + point.y - drag.startY
+            )
+          )
+        )
+      });
+      return;
+    }
+    const limits = layoutLimits[drag.targetId];
+    const fallbackLimit = Math.max(
+      previewResolution?.width ?? 800,
+      previewResolution?.height ?? 800
+    );
+    const clamp = (v: number, min: number, max: number) =>
+      Math.max(min, Math.min(max, Math.round(v)));
+    const dx = clamp(
+      drag.baseX + point.x - drag.startX,
+      limits?.minDx ?? -fallbackLimit,
+      limits?.maxDx ?? fallbackLimit
+    );
+    const dy = clamp(
+      drag.baseY + point.y - drag.startY,
+      limits?.minDy ?? -fallbackLimit,
+      limits?.maxDy ?? fallbackLimit
+    );
     setDesign((prev) => ({
       ...prev,
       layoutOffsets: { ...prev.layoutOffsets, [drag.targetId]: { dx, dy } }
@@ -438,9 +509,37 @@ export function WatchfaceEditor({
     }));
   }
 
+  function setFirmwareLayerVisible(layerId: string, visible: boolean) {
+    setDesign((prev) => ({
+      ...prev,
+      layerVisibility: {
+        ...prev.layerVisibility,
+        [layerId]: visible
+      }
+    }));
+  }
+
+  function updateStaticSeparator(
+    separatorId: WatchfaceStaticSeparatorId,
+    patch: Partial<
+      CorosWatchfaceDesignState["staticSeparators"][WatchfaceStaticSeparatorId]
+    >
+  ) {
+    setDesign((prev) => ({
+      ...prev,
+      staticSeparators: {
+        ...prev.staticSeparators,
+        [separatorId]: {
+          ...prev.staticSeparators[separatorId],
+          ...patch
+        }
+      }
+    }));
+  }
+
   function setMetricStyle(
     metricId: WatchfaceMetricId,
-    patch: { color?: string; scale?: number }
+    patch: { color?: string; scale?: number; fontFamily?: string }
   ) {
     setDesign((prev) => {
       const current = prev.metricStyles?.[metricId] ?? {
@@ -456,13 +555,29 @@ export function WatchfaceEditor({
 
   function setTimeStyle(
     partId: WatchfaceTimePartId,
-    patch: { color?: string; scale?: number }
+    patch: { color?: string; scale?: number; fontFamily?: string }
   ) {
     setDesign((prev) => {
       const current = prev.timeStyles?.[partId] ?? { color: prev.digitColor, scale: 1 };
       return {
         ...prev,
         timeStyles: { ...prev.timeStyles, [partId]: { ...current, ...patch } }
+      };
+    });
+  }
+
+  function setDateStyle(
+    partId: WatchfaceDatePartId,
+    patch: { scale?: number; fontFamily?: string }
+  ) {
+    setDesign((prev) => {
+      const current = prev.dateStyles?.[partId] ?? { scale: 1 };
+      return {
+        ...prev,
+        dateStyles: {
+          ...prev.dateStyles,
+          [partId]: { ...current, ...patch }
+        }
       };
     });
   }
@@ -489,7 +604,13 @@ export function WatchfaceEditor({
 
   function updateSprite(
     spriteId: string,
-    patch: Partial<{ x: number; y: number; scale: number; rotation: number }>
+    patch: Partial<{
+      x: number;
+      y: number;
+      scale: number;
+      rotation: number;
+      visible: boolean;
+    }>
   ) {
     setDesign((prev) => ({
       ...prev,
@@ -522,7 +643,8 @@ export function WatchfaceEditor({
         x: Math.round(previewWidth / 2),
         y: Math.round((previewResolution?.height ?? previewWidth) / 2),
         scale: 1,
-        rotation: 0
+        rotation: 0,
+        visible: true
       };
       setDesign((prev) => ({
         ...prev,
@@ -613,7 +735,18 @@ export function WatchfaceEditor({
 
       <div className="watchface-editor-grid">
         <aside className="watchface-editor-layers">
-          <p className="watchface-editor-pane-title">Layers</p>
+          <div className="watchface-editor-pane-heading">
+            <p className="watchface-editor-pane-title">Layers</p>
+            <button
+              type="button"
+              className="watchface-add-sprite"
+              disabled={loadingSprite || (design.designSprites ?? []).length >= MAX_DESIGN_SPRITES}
+              onClick={() => void chooseSprite()}
+            >
+              {loadingSprite ? <Loader2 className="spin" size={13} /> : <ImagePlus size={13} />}
+              Add sprite
+            </button>
+          </div>
           {details ? (
             <ul>
               {layers.map((layer) => (
@@ -635,14 +768,18 @@ export function WatchfaceEditor({
                       onClick={() => {
                         if (layer.metricId) {
                           setMetricVisible(layer.metricId, !layer.visible);
+                        } else if (layer.staticSeparatorId) {
+                          updateStaticSeparator(layer.staticSeparatorId, {
+                            enabled: !layer.visible
+                          });
                         } else if (layer.spriteId) {
-                          removeSprite(layer.spriteId);
+                          updateSprite(layer.spriteId, { visible: !layer.visible });
+                        } else if (layer.layoutGroupId) {
+                          setFirmwareLayerVisible(layer.layoutGroupId, !layer.visible);
                         }
                       }}
                     >
-                      {layer.spriteId ? (
-                        <Trash2 size={14} />
-                      ) : layer.visible ? (
+                      {layer.visible ? (
                         <Eye size={14} />
                       ) : (
                         <EyeOff size={14} />
@@ -719,6 +856,10 @@ export function WatchfaceEditor({
   );
 
   function renderInspector(layer: EditorLayer) {
+    if (layer.staticSeparatorId) {
+      return renderStaticSeparatorInspector(layer.staticSeparatorId);
+    }
+
     if (layer.kind === "background") {
       return (
         <div className="watchface-inspector-group">
@@ -770,9 +911,13 @@ export function WatchfaceEditor({
       const style = design.timeStyles?.[layer.timePartId];
       return (
         <div className="watchface-inspector-group">
+          {renderLayerVisibilityToggle(layer)}
           <label className="field">
             Digit font
-            <select value={design.fontFamily} onChange={(e) => patchDesign({ fontFamily: e.target.value })}>
+            <select
+              value={style?.fontFamily ?? design.fontFamily}
+              onChange={(e) => setTimeStyle(layer.timePartId!, { fontFamily: e.target.value })}
+            >
               <option value="">Keep template digits</option>
               {DIGIT_FONT_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
             </select>
@@ -802,6 +947,16 @@ export function WatchfaceEditor({
             Show this metric
           </label>
           <label className="field">
+            Digit font
+            <select
+              value={style?.fontFamily ?? design.fontFamily}
+              onChange={(e) => setMetricStyle(layer.metricId!, { fontFamily: e.target.value })}
+            >
+              <option value="">Keep template digits</option>
+              {DIGIT_FONT_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
+            </select>
+          </label>
+          <label className="field">
             Color
             <span className="watchface-color-control">
               <input type="color" value={style?.color ?? design.digitColor} onChange={(e) => setMetricStyle(layer.metricId!, { color: e.target.value })} />
@@ -817,6 +972,43 @@ export function WatchfaceEditor({
       );
     }
 
+    if (
+      layer.kind === "weekday" ||
+      (layer.kind === "date" &&
+        (layer.layoutGroupId === "dateMonth" || layer.layoutGroupId === "dateDay"))
+    ) {
+      const partId = layer.layoutGroupId as WatchfaceDatePartId;
+      const style = design.dateStyles?.[partId];
+      const scale = style?.scale ?? 1;
+      return (
+        <div className="watchface-inspector-group">
+          {renderLayerVisibilityToggle(layer)}
+          <label className="field">
+            Font
+            <select
+              value={style?.fontFamily ?? design.fontFamily}
+              onChange={(e) => setDateStyle(partId, { fontFamily: e.target.value })}
+            >
+              <option value="">Keep template font</option>
+              {DIGIT_FONT_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
+            </select>
+          </label>
+          <label className="field watchface-zoom-control">
+            Scale <span>{scale.toFixed(2)}×</span>
+            <input
+              type="range"
+              min="0.5"
+              max="2"
+              step="0.02"
+              value={scale}
+              onChange={(e) => setDateStyle(partId, { scale: Number(e.target.value) })}
+            />
+          </label>
+          {renderPositionReadout(layer)}
+        </div>
+      );
+    }
+
     if (layer.kind === "customSprite" && layer.spriteId) {
       const sprite = (design.designSprites ?? []).find((s) => s.id === layer.spriteId);
       if (!sprite) {
@@ -824,6 +1016,7 @@ export function WatchfaceEditor({
       }
       return (
         <div className="watchface-inspector-group">
+          {renderLayerVisibilityToggle(layer)}
           <label className="field watchface-zoom-control">
             Size <span>{(sprite.scale * 100).toFixed(0)}%</span>
             <input
@@ -856,6 +1049,7 @@ export function WatchfaceEditor({
 
     return (
       <div className="watchface-inspector-group">
+        {renderLayerVisibilityToggle(layer)}
         {renderPositionReadout(layer)}
         <p className="watchface-studio-summary">
           This element is drawn live by the watch. Drag it on the face to reposition it.
@@ -864,37 +1058,249 @@ export function WatchfaceEditor({
     );
   }
 
+  function renderLayerVisibilityToggle(layer: EditorLayer) {
+    if (!layer.canHide || layer.staticSeparatorId || layer.metricId) {
+      return null;
+    }
+    const setVisible = (visible: boolean) => {
+      if (layer.spriteId) {
+        updateSprite(layer.spriteId, { visible });
+      } else if (layer.layoutGroupId) {
+        setFirmwareLayerVisible(layer.layoutGroupId, visible);
+      }
+    };
+    return (
+      <label className="watchface-studio-toggle">
+        <input
+          type="checkbox"
+          checked={layer.visible}
+          onChange={(e) => setVisible(e.target.checked)}
+        />
+        Show this layer
+      </label>
+    );
+  }
+
   function renderPositionReadout(layer: EditorLayer) {
     if (!layer.capabilities.position || !layer.layoutGroupId) {
       return null;
     }
     const offset = design.layoutOffsets?.[layer.layoutGroupId] ?? { dx: 0, dy: 0 };
-    const nudge = (dx: number, dy: number) =>
+    const limits = layoutLimits[layer.layoutGroupId];
+    const fallbackLimit = Math.max(
+      previewResolution?.width ?? 800,
+      previewResolution?.height ?? 800
+    );
+    const clamp = (value: number, minimum: number, maximum: number) =>
+      Math.max(minimum, Math.min(maximum, Math.round(value)));
+    const setOffset = (dx: number, dy: number) =>
       setDesign((prev) => {
-        const current = prev.layoutOffsets?.[layer.layoutGroupId!] ?? { dx: 0, dy: 0 };
         return {
           ...prev,
           layoutOffsets: {
             ...prev.layoutOffsets,
             [layer.layoutGroupId!]: {
-              dx: Math.max(-400, Math.min(400, current.dx + dx)),
-              dy: Math.max(-400, Math.min(400, current.dy + dy))
+              dx: clamp(
+                dx,
+                limits?.minDx ?? -fallbackLimit,
+                limits?.maxDx ?? fallbackLimit
+              ),
+              dy: clamp(
+                dy,
+                limits?.minDy ?? -fallbackLimit,
+                limits?.maxDy ?? fallbackLimit
+              )
             }
           }
         };
       });
+    const alignX = (position: "start" | "center" | "end") => {
+      const min = limits?.minDx ?? -fallbackLimit;
+      const max = limits?.maxDx ?? fallbackLimit;
+      setOffset(position === "start" ? min : position === "end" ? max : (min + max) / 2, offset.dy);
+    };
+    const alignY = (position: "start" | "center" | "end") => {
+      const min = limits?.minDy ?? -fallbackLimit;
+      const max = limits?.maxDy ?? fallbackLimit;
+      setOffset(offset.dx, position === "start" ? min : position === "end" ? max : (min + max) / 2);
+    };
     return (
       <div className="watchface-inspector-position">
-        <span>Offset {offset.dx}, {offset.dy}px</span>
+        <span>Exact offset</span>
+        <div className="watchface-position-inputs">
+          <label>
+            X
+            <input
+              type="number"
+              min={limits?.minDx ?? -fallbackLimit}
+              max={limits?.maxDx ?? fallbackLimit}
+              value={offset.dx}
+              onChange={(e) => setOffset(Number(e.target.value) || 0, offset.dy)}
+            />
+          </label>
+          <label>
+            Y
+            <input
+              type="number"
+              min={limits?.minDy ?? -fallbackLimit}
+              max={limits?.maxDy ?? fallbackLimit}
+              value={offset.dy}
+              onChange={(e) => setOffset(offset.dx, Number(e.target.value) || 0)}
+            />
+          </label>
+        </div>
+        <span>Align to face</span>
+        <div className="watchface-align-grid">
+          <button type="button" onClick={() => alignX("start")}>Left</button>
+          <button type="button" onClick={() => alignX("center")}>Center</button>
+          <button type="button" onClick={() => alignX("end")}>Right</button>
+          <button type="button" onClick={() => alignY("start")}>Top</button>
+          <button type="button" onClick={() => alignY("center")}>Middle</button>
+          <button type="button" onClick={() => alignY("end")}>Bottom</button>
+        </div>
+        <span>Fine tune · 1 px</span>
         <div className="watchface-nudge-pad">
-          <button type="button" onClick={() => nudge(0, -5)} aria-label="Nudge up">↑</button>
-          <button type="button" onClick={() => nudge(-5, 0)} aria-label="Nudge left">←</button>
-          <button type="button" onClick={() => nudge(5, 0)} aria-label="Nudge right">→</button>
-          <button type="button" onClick={() => nudge(0, 5)} aria-label="Nudge down">↓</button>
+          <button type="button" onClick={() => setOffset(offset.dx, offset.dy - 1)} aria-label="Nudge up">↑</button>
+          <button type="button" onClick={() => setOffset(offset.dx - 1, offset.dy)} aria-label="Nudge left">←</button>
+          <button type="button" onClick={() => setOffset(offset.dx + 1, offset.dy)} aria-label="Nudge right">→</button>
+          <button type="button" onClick={() => setOffset(offset.dx, offset.dy + 1)} aria-label="Nudge down">↓</button>
           {(offset.dx !== 0 || offset.dy !== 0) ? (
-            <button type="button" className="watchface-nudge-reset" onClick={() => nudge(-offset.dx, -offset.dy)}>Reset</button>
+            <button type="button" className="watchface-nudge-reset" onClick={() => setOffset(0, 0)}>Reset</button>
           ) : null}
         </div>
+      </div>
+    );
+  }
+
+  function renderStaticSeparatorInspector(separatorId: WatchfaceStaticSeparatorId) {
+    const separator = design.staticSeparators[separatorId];
+    const faceWidth = previewResolution?.width ?? previewWidth;
+    const faceHeight = previewResolution?.height ?? previewWidth;
+    const boundsForSize = (size: number) => ({
+      halfWidth: Math.max(24, size * 0.65) / 2,
+      halfHeight: Math.max(24, size * 1.15) / 2
+    });
+    const setPosition = (x: number, y: number, size = separator.size) => {
+      const { halfWidth, halfHeight } = boundsForSize(size);
+      updateStaticSeparator(separatorId, {
+        x: Math.round(Math.max(halfWidth, Math.min(faceWidth - halfWidth, x))),
+        y: Math.round(Math.max(halfHeight, Math.min(faceHeight - halfHeight, y)))
+      });
+    };
+    const alignX = (position: "start" | "center" | "end") => {
+      const { halfWidth } = boundsForSize(separator.size);
+      setPosition(
+        position === "start"
+          ? halfWidth
+          : position === "end"
+            ? faceWidth - halfWidth
+            : faceWidth / 2,
+        separator.y
+      );
+    };
+    const alignY = (position: "start" | "center" | "end") => {
+      const { halfHeight } = boundsForSize(separator.size);
+      setPosition(
+        separator.x,
+        position === "start"
+          ? halfHeight
+          : position === "end"
+            ? faceHeight - halfHeight
+            : faceHeight / 2
+      );
+    };
+    return (
+      <div className="watchface-inspector-group">
+        <label className="watchface-studio-toggle">
+          <input
+            type="checkbox"
+            checked={separator.enabled}
+            onChange={(e) => updateStaticSeparator(separatorId, { enabled: e.target.checked })}
+          />
+          Show {separatorId === "colon" ? "time colon" : "date slash"}
+        </label>
+        <label className="field">
+          Font
+          <select
+            value={separator.fontFamily ?? design.fontFamily}
+            onChange={(e) =>
+              updateStaticSeparator(separatorId, { fontFamily: e.target.value })
+            }
+          >
+            <option value="">System font</option>
+            {DIGIT_FONT_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
+          </select>
+        </label>
+        <label className="field watchface-zoom-control">
+          Size <span>{separator.size}px</span>
+          <input
+            type="range"
+            min="12"
+            max="200"
+            step="1"
+            value={separator.size}
+            onChange={(e) => {
+              const size = Number(e.target.value);
+              updateStaticSeparator(separatorId, { size });
+              setPosition(separator.x, separator.y, size);
+            }}
+          />
+        </label>
+        <label className="field">
+          Color
+          <span className="watchface-color-control">
+            <input
+              type="color"
+              value={separator.color}
+              onChange={(e) => updateStaticSeparator(separatorId, { color: e.target.value })}
+            />
+            <code>{separator.color}</code>
+          </span>
+        </label>
+        <div className="watchface-inspector-position">
+          <span>Exact position</span>
+          <div className="watchface-position-inputs">
+            <label>
+              X
+              <input
+                type="number"
+                min="0"
+                max={faceWidth}
+                value={separator.x}
+                onChange={(e) => setPosition(Number(e.target.value) || 0, separator.y)}
+              />
+            </label>
+            <label>
+              Y
+              <input
+                type="number"
+                min="0"
+                max={faceHeight}
+                value={separator.y}
+                onChange={(e) => setPosition(separator.x, Number(e.target.value) || 0)}
+              />
+            </label>
+          </div>
+          <span>Align to face</span>
+          <div className="watchface-align-grid">
+            <button type="button" onClick={() => alignX("start")}>Left</button>
+            <button type="button" onClick={() => alignX("center")}>Center</button>
+            <button type="button" onClick={() => alignX("end")}>Right</button>
+            <button type="button" onClick={() => alignY("start")}>Top</button>
+            <button type="button" onClick={() => alignY("center")}>Middle</button>
+            <button type="button" onClick={() => alignY("end")}>Bottom</button>
+          </div>
+          <span>Fine tune · 1 px</span>
+          <div className="watchface-nudge-pad">
+            <button type="button" onClick={() => setPosition(separator.x, separator.y - 1)} aria-label="Nudge up">↑</button>
+            <button type="button" onClick={() => setPosition(separator.x - 1, separator.y)} aria-label="Nudge left">←</button>
+            <button type="button" onClick={() => setPosition(separator.x + 1, separator.y)} aria-label="Nudge right">→</button>
+            <button type="button" onClick={() => setPosition(separator.x, separator.y + 1)} aria-label="Nudge down">↓</button>
+          </div>
+        </div>
+        <p className="watchface-studio-summary">
+          Enable it, then drag its outline on the face or use the exact controls.
+        </p>
       </div>
     );
   }

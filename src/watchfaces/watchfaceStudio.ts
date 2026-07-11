@@ -25,6 +25,8 @@ export interface WatchfaceStudioOptions {
   metricStyles?: WatchfaceMetricStyles;
   /** Independent hour/minute bitmap styles. */
   timeStyles?: WatchfaceTimeStyles;
+  /** Independent weekday/month/day bitmap scaling. */
+  dateStyles?: WatchfaceDateStyles;
   /** Live AM/PM indicator sprite styling, when the template supports it. */
   ampmStyle?: WatchfaceAmPmStyle;
 }
@@ -80,6 +82,8 @@ export interface WatchfaceStaticSeparatorStyle {
   y: number;
   size: number;
   color: string;
+  /** Optional per-separator font; falls back to the design font. */
+  fontFamily?: string;
 }
 
 export type WatchfaceStaticSeparators = Record<
@@ -552,6 +556,8 @@ export interface WatchfaceMetricSpriteStyle {
   color: string;
   /** Scale relative to the source template digit sprites. */
   scale: number;
+  /** Optional per-layer font; falls back to the design font. */
+  fontFamily?: string;
 }
 
 export type WatchfaceMetricStyles = Partial<
@@ -563,6 +569,53 @@ export type WatchfaceTimePartId = "hours" | "minutes";
 export type WatchfaceTimeStyles = Partial<
   Record<WatchfaceTimePartId, WatchfaceMetricSpriteStyle>
 >;
+
+export type WatchfaceDatePartId = "weekday" | "dateMonth" | "dateDay";
+
+export interface WatchfaceDateSpriteStyle {
+  /** Scale relative to the source template sprites. */
+  scale: number;
+  /** Optional per-layer font; falls back to the design font. */
+  fontFamily?: string;
+}
+
+export type WatchfaceDateStyles = Partial<
+  Record<WatchfaceDatePartId, WatchfaceDateSpriteStyle>
+>;
+
+interface WatchfaceDatePartDefinition {
+  id: WatchfaceDatePartId;
+  rectKey: string;
+  fontKey: string;
+  studioFolder: string;
+  kind: "digits" | "week";
+}
+
+export const WATCHFACE_DATE_PARTS: WatchfaceDatePartDefinition[] = [
+  {
+    id: "weekday",
+    rectKey: "english_date_week_rect",
+    fontKey: "english_date_week_font",
+    studioFolder: "cl_weekday",
+    kind: "week"
+  },
+  {
+    id: "dateMonth",
+    rectKey: "english_date_month_rect",
+    fontKey: "english_date_month_font",
+    studioFolder: "cl_date_month",
+    kind: "digits"
+  },
+  {
+    id: "dateDay",
+    rectKey: "english_date_day_rect",
+    fontKey: "english_date_day_font",
+    studioFolder: "cl_date_day",
+    kind: "digits"
+  }
+];
+
+const WEEKDAY_LABELS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 
 interface WatchfaceTimePartDefinition {
   id: WatchfaceTimePartId;
@@ -866,6 +919,7 @@ export async function buildMetricSpriteReplacements(
     width: number;
     height: number;
     color: string;
+    fontFamily: string;
   }[] = [];
   for (const resolution of details.resolutions) {
     for (const metric of WATCHFACE_FIXED_METRICS) {
@@ -876,6 +930,7 @@ export async function buildMetricSpriteReplacements(
         continue;
       }
       const normalizedScale = Math.max(0.5, Math.min(2, style.scale));
+      const metricFontFamily = style.fontFamily ?? fontFamily;
       source.files.slice(0, 10).forEach((file, digit) => {
         jobs.push({
           source: file,
@@ -883,23 +938,26 @@ export async function buildMetricSpriteReplacements(
           digit,
           width: Math.max(1, Math.round(file.width * normalizedScale)),
           height: Math.max(1, Math.round(file.height * normalizedScale)),
-          color: style.color
+          color: style.color,
+          fontFamily: metricFontFamily
         });
       });
     }
   }
-  const sourceAssets = fontFamily
-    ? []
-    : await loadAssets([...new Set(jobs.map((job) => job.source.path))]);
+  const sourceAssets = await loadAssets([
+    ...new Set(
+      jobs.filter((job) => !job.fontFamily).map((job) => job.source.path)
+    )
+  ]);
   const assetsByPath = new Map(sourceAssets.map((asset) => [asset.path, asset]));
   const replacements: CorosWatchfaceAssetReplacement[] = [];
   for (const job of jobs) {
-    const dataUrl = fontFamily
+    const dataUrl = job.fontFamily
       ? renderDigitSprite(
           String(job.digit),
           job.width,
           job.height,
-          fontFamily,
+          job.fontFamily,
           job.color
         )
       : await resizeAndTintSprite(
@@ -976,6 +1034,7 @@ export async function buildTimeSpriteReplacements(
     width: number;
     height: number;
     color: string;
+    fontFamily: string;
   }[] = [];
   for (const resolution of details.resolutions) {
     for (const part of WATCHFACE_TIME_PARTS) {
@@ -984,6 +1043,7 @@ export async function buildTimeSpriteReplacements(
         continue;
       }
       const normalizedScale = Math.max(0.5, Math.min(2, style.scale));
+      const partFontFamily = style.fontFamily ?? fontFamily;
       for (const digit of part.digits) {
         const source = findSpriteFolder(resolution, resolution.config[digit.fontKey]);
         if (!source) {
@@ -996,24 +1056,27 @@ export async function buildTimeSpriteReplacements(
             digit: value,
             width: Math.max(1, Math.round(file.width * normalizedScale)),
             height: Math.max(1, Math.round(file.height * normalizedScale)),
-            color: style.color
+            color: style.color,
+            fontFamily: partFontFamily
           });
         });
       }
     }
   }
-  const sourceAssets = fontFamily
-    ? []
-    : await loadAssets([...new Set(jobs.map((job) => job.source.path))]);
+  const sourceAssets = await loadAssets([
+    ...new Set(
+      jobs.filter((job) => !job.fontFamily).map((job) => job.source.path)
+    )
+  ]);
   const assetsByPath = new Map(sourceAssets.map((asset) => [asset.path, asset]));
   const replacements: CorosWatchfaceAssetReplacement[] = [];
   for (const job of jobs) {
-    const dataUrl = fontFamily
+    const dataUrl = job.fontFamily
       ? renderDigitSprite(
           String(job.digit),
           job.width,
           job.height,
-          fontFamily,
+          job.fontFamily,
           job.color
         )
       : await resizeAndTintSprite(
@@ -1021,6 +1084,112 @@ export async function buildTimeSpriteReplacements(
           job.width,
           job.height,
           job.color
+        );
+    replacements.push({ path: job.path, dataUrl, create: true });
+  }
+  return replacements;
+}
+
+/** Scales weekday/month/day layout rectangles and isolates their sprite folders. */
+export function buildDateStyleOverrides(
+  details: CorosWatchfaceTemplateDetails,
+  styles: WatchfaceDateStyles,
+  useStudioFolders = false
+): CorosWatchfaceConfigOverride[] {
+  const overrides: CorosWatchfaceConfigOverride[] = [];
+  for (const resolution of details.resolutions) {
+    const values: Record<string, string> = {};
+    for (const part of WATCHFACE_DATE_PARTS) {
+      const style = styles[part.id];
+      const rect = style
+        ? scaleConfigRectValue(resolution.config[part.rectKey] ?? "", style.scale)
+        : null;
+      const source = findSpriteFolder(resolution, resolution.config[part.fontKey]);
+      if (!style || !rect || !source) {
+        continue;
+      }
+      values[part.rectKey] = rect;
+      if (useStudioFolders) {
+        values[part.fontKey] = part.studioFolder;
+      }
+    }
+    if (Object.keys(values).length > 0) {
+      overrides.push({ path: `${resolution.directory}/config.txt`, values });
+    }
+  }
+  return overrides;
+}
+
+/** Generates isolated, resized sprite folders for weekday/month/day layers. */
+export async function buildDateSpriteReplacements(
+  details: CorosWatchfaceTemplateDetails,
+  styles: WatchfaceDateStyles,
+  options: Pick<WatchfaceStudioOptions, "fontFamily" | "digitColor" | "tintLabels">,
+  loadAssets: WatchfaceAssetLoader
+): Promise<CorosWatchfaceAssetReplacement[]> {
+  const jobs: {
+    source: CorosWatchfaceSpriteFile;
+    path: string;
+    value: number;
+    width: number;
+    height: number;
+    kind: "digits" | "week";
+    fontFamily: string;
+  }[] = [];
+  for (const resolution of details.resolutions) {
+    for (const part of WATCHFACE_DATE_PARTS) {
+      const style = styles[part.id];
+      const source = style
+        ? findSpriteFolder(resolution, resolution.config[part.fontKey])
+        : null;
+      if (!style || !source) {
+        continue;
+      }
+      const normalizedScale = Math.max(0.5, Math.min(2, style.scale));
+      const partFontFamily = style.fontFamily ?? options.fontFamily;
+      const limit = part.kind === "week" ? 7 : 10;
+      source.files.slice(0, limit).forEach((file, value) => {
+        jobs.push({
+          source: file,
+          path: `${resolution.directory}/${part.studioFolder}/${String(value).padStart(2, "0")}.png`,
+          value,
+          width: Math.max(1, Math.round(file.width * normalizedScale)),
+          height: Math.max(1, Math.round(file.height * normalizedScale)),
+          kind: part.kind,
+          fontFamily: partFontFamily
+        });
+      });
+    }
+  }
+  const assets = await loadAssets([
+    ...new Set(
+      jobs.filter((job) => !job.fontFamily).map((job) => job.source.path)
+    )
+  ]);
+  const assetsByPath = new Map(assets.map((asset) => [asset.path, asset]));
+  const replacements: CorosWatchfaceAssetReplacement[] = [];
+  for (const job of jobs) {
+    const asset = assetsByPath.get(job.source.path);
+    if (!asset && !job.fontFamily) {
+      continue;
+    }
+    const dataUrl = job.fontFamily
+      ? renderDigitSprite(
+          job.kind === "week"
+            ? WEEKDAY_LABELS[job.value] ?? String(job.value)
+            : String(job.value),
+          job.width,
+          job.height,
+          job.fontFamily,
+          options.digitColor
+        )
+      : await resizeAndTintSprite(
+          asset!.dataUrl,
+          job.width,
+          job.height,
+          job.kind === "week" && options.tintLabels
+            ? options.digitColor
+            : undefined
         );
     replacements.push({ path: job.path, dataUrl, create: true });
   }
@@ -1212,6 +1381,36 @@ export function buildLayoutOverrides(
         const shifted = offsetConfigValue(resolution.config[key]!, dx, dy);
         if (shifted !== null) {
           values[key] = shifted;
+        }
+      }
+    }
+    if (Object.keys(values).length > 0) {
+      overrides.push({ path: `${resolution.directory}/config.txt`, values });
+    }
+  }
+  return overrides;
+}
+
+/** Hides firmware-backed editor layers by clearing their position/rect keys. */
+export function buildLayerVisibilityOverrides(
+  details: CorosWatchfaceTemplateDetails,
+  visibility: Record<string, boolean>
+): CorosWatchfaceConfigOverride[] {
+  const overrides: CorosWatchfaceConfigOverride[] = [];
+  for (const resolution of details.resolutions) {
+    const values: Record<string, string> = {};
+    for (const group of WATCHFACE_LAYOUT_GROUPS) {
+      if (visibility[group.id] !== false) {
+        continue;
+      }
+      for (const key of layoutGroupKeys(resolution, group)) {
+        values[key] = "";
+      }
+      if (group.id === "separators") {
+        for (const key of ["colon_icon", "arc_cut_icon"]) {
+          if (Object.prototype.hasOwnProperty.call(resolution.config, key)) {
+            values[key] = "";
+          }
         }
       }
     }
@@ -1580,6 +1779,7 @@ export async function drawStudioPreview(
     source: PreviewDigitSource;
     value: string;
     metricId?: WatchfaceMetricId;
+    datePartId?: WatchfaceDatePartId;
   }[] = [];
   if (complication && complicationRect && complicationSource) {
     numberPlans.push({
@@ -1588,23 +1788,25 @@ export async function drawStudioPreview(
       value: complication.sampleValue
     });
   }
-  const dateFields: [string, string, string][] = [
+  const dateFields: [string, string, string, WatchfaceDatePartId][] = [
     [
       "english_date_month_rect",
       "english_date_month_font",
-      String(now.getMonth() + 1).padStart(2, "0")
+      String(now.getMonth() + 1).padStart(2, "0"),
+      "dateMonth"
     ],
     [
       "english_date_day_rect",
       "english_date_day_font",
-      String(now.getDate()).padStart(2, "0")
+      String(now.getDate()).padStart(2, "0"),
+      "dateDay"
     ]
   ];
-  for (const [rectKey, fontKey, value] of dateFields) {
+  for (const [rectKey, fontKey, value, datePartId] of dateFields) {
     const rect = parseConfigRect(config[rectKey]);
     const source = findSpriteFolder(resolution, config[fontKey]);
     if (rect && source) {
-      numberPlans.push({ rect, source, value });
+      numberPlans.push({ rect, source, value, datePartId });
     }
   }
   for (const metric of WATCHFACE_FIXED_METRICS) {
@@ -1622,19 +1824,27 @@ export async function drawStudioPreview(
 
   // Digits come from the chosen font, or from the template bitmaps otherwise.
   const digitSprites = new Map<string, HTMLImageElement>();
-  if (!options.fontFamily) {
-    for (const planned of digitPlan) {
-      const file = planned.source?.files[planned.digit];
+  for (const planned of digitPlan) {
+    const file = planned.source?.files[planned.digit];
+    const fontFamily =
+      options.timeStyles?.[planned.partId]?.fontFamily ?? options.fontFamily;
+    if (file && !fontFamily) {
+      wantedSprites.set(file.path, { color: null });
+    }
+  }
+  for (const plan of numberPlans) {
+    const fontFamily = plan.datePartId
+      ? options.dateStyles?.[plan.datePartId]?.fontFamily ?? options.fontFamily
+      : plan.metricId
+        ? options.metricStyles?.[plan.metricId]?.fontFamily ?? options.fontFamily
+        : options.fontFamily;
+    if (fontFamily) {
+      continue;
+    }
+    for (const digit of plan.value) {
+      const file = plan.source.files[Number(digit)];
       if (file) {
         wantedSprites.set(file.path, { color: null });
-      }
-    }
-    for (const plan of numberPlans) {
-      for (const digit of plan.value) {
-        const file = plan.source.files[Number(digit)];
-        if (file) {
-          wantedSprites.set(file.path, { color: null });
-        }
       }
     }
   }
@@ -1692,6 +1902,7 @@ export async function drawStudioPreview(
       continue;
     }
     const timeStyle = options.timeStyles?.[planned.partId];
+    const timeFontFamily = timeStyle?.fontFamily ?? options.fontFamily;
     const timeScale = timeStyle
       ? Math.max(0.5, Math.min(2, timeStyle.scale))
       : 1;
@@ -1699,15 +1910,15 @@ export async function drawStudioPreview(
     const height = Math.max(1, Math.round(file.height * timeScale));
     let image = digitSprites.get(file.path) ?? loaded.get(file.path);
     if (timeStyle) {
-      const cacheKey = `${file.path}|${options.fontFamily}|${timeStyle.color}|${timeScale}`;
+      const cacheKey = `${file.path}|${timeFontFamily}|${timeStyle.color}|${timeScale}`;
       image = styledTimeGlyphs.get(cacheKey);
       if (!image) {
-        const dataUrl = options.fontFamily
+        const dataUrl = timeFontFamily
           ? renderDigitSprite(
               String(planned.digit),
               width,
               height,
-              options.fontFamily,
+              timeFontFamily,
               timeStyle.color
             )
           : await resizeAndTintSprite(
@@ -1784,16 +1995,35 @@ export async function drawStudioPreview(
   }
 
   if (weekFile && weekRect) {
-    const image = loaded.get(weekFile.path);
+    const weekStyle = options.dateStyles?.weekday;
+    const weekFontFamily = weekStyle?.fontFamily ?? options.fontFamily;
+    let image = loaded.get(weekFile.path);
+    const weekScale = Math.max(
+      0.5,
+      Math.min(2, weekStyle?.scale ?? 1)
+    );
+    const weekWidth = Math.max(1, Math.round(weekFile.width * weekScale));
+    const weekHeight = Math.max(1, Math.round(weekFile.height * weekScale));
+    if (weekFontFamily) {
+      image = await loadStudioImage(
+        renderDigitSprite(
+          WEEKDAY_LABELS[now.getDay()] ?? "DAY",
+          weekWidth,
+          weekHeight,
+          weekFontFamily,
+          options.digitColor
+        )
+      );
+    }
     if (image) {
       const centerX = ((weekRect.x0 + weekRect.x1) / 2) * scale;
       const centerY = ((weekRect.y0 + weekRect.y1) / 2) * scale;
       context.drawImage(
         image,
-        centerX - (weekFile.width * scale) / 2,
-        centerY - (weekFile.height * scale) / 2,
-        weekFile.width * scale,
-        weekFile.height * scale
+        centerX - (weekWidth * scale) / 2,
+        centerY - (weekHeight * scale) / 2,
+        weekWidth * scale,
+        weekHeight * scale
       );
     }
   }
@@ -1816,6 +2046,11 @@ export async function drawStudioPreview(
     const metricStyle = plan.metricId
       ? options.metricStyles?.[plan.metricId]
       : undefined;
+    const dateStyle = plan.datePartId
+      ? options.dateStyles?.[plan.datePartId]
+      : undefined;
+    const glyphFontFamily =
+      metricStyle?.fontFamily ?? dateStyle?.fontFamily ?? options.fontFamily;
     const glyphs: {
       file: CorosWatchfaceSpriteFile;
       image: HTMLImageElement;
@@ -1825,40 +2060,55 @@ export async function drawStudioPreview(
       if (!file) {
         continue;
       }
-      if (!metricStyle) {
+      if (!metricStyle && !dateStyle) {
         const image = digitSprites.get(file.path) ?? loaded.get(file.path);
         if (image) {
           glyphs.push({ file, image });
         }
         continue;
       }
-      const metricScale = Math.max(0.5, Math.min(2, metricStyle.scale));
+      const glyphScale = Math.max(
+        0.5,
+        Math.min(2, metricStyle?.scale ?? dateStyle?.scale ?? 1)
+      );
       const styledFile = {
         ...file,
-        width: Math.max(1, Math.round(file.width * metricScale)),
-        height: Math.max(1, Math.round(file.height * metricScale))
+        width: Math.max(1, Math.round(file.width * glyphScale)),
+        height: Math.max(1, Math.round(file.height * glyphScale))
       };
-      const cacheKey = `${file.path}|${options.fontFamily}|${metricStyle.color}|${metricScale}`;
+      const glyphColor = metricStyle?.color ?? options.digitColor;
+      const cacheKey = `${file.path}|${glyphFontFamily}|${glyphColor}|${glyphScale}`;
       let image = styledMetricGlyphs.get(cacheKey);
       if (!image) {
-        const dataUrl = options.fontFamily
-          ? renderDigitSprite(
+        if (glyphFontFamily) {
+          image = await loadStudioImage(
+            renderDigitSprite(
               digit,
               styledFile.width,
               styledFile.height,
-              options.fontFamily,
-              metricStyle.color
+              glyphFontFamily,
+              glyphColor
             )
-          : await resizeAndTintSprite(
+          );
+        } else if (metricStyle) {
+          image = await loadStudioImage(
+            await resizeAndTintSprite(
               loadedAssets.get(file.path)?.dataUrl ?? "",
               styledFile.width,
               styledFile.height,
-              metricStyle.color
-            );
-        image = await loadStudioImage(dataUrl);
-        styledMetricGlyphs.set(cacheKey, image);
+              glyphColor
+            )
+          );
+        } else {
+          image = loaded.get(file.path);
+        }
+        if (image) {
+          styledMetricGlyphs.set(cacheKey, image);
+        }
       }
-      glyphs.push({ file: styledFile, image });
+      if (image) {
+        glyphs.push({ file: styledFile, image });
+      }
     }
     if (glyphs.length === 0) {
       continue;
