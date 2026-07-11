@@ -3,11 +3,17 @@ import {
   applyConfigOverridesToDetails,
   buildLayoutOverrides,
   buildMetricOverrides,
+  buildMetricStyleOverrides,
+  buildStaticSeparatorOverrides,
+  buildTimeStyleOverrides,
   computeLayoutGroupBounds,
   computeLayoutOffsetLimits,
   getAvailableComplications,
   getFixedMetricCapabilities,
-  mergeConfigOverrides
+  inferStaticSeparators,
+  mergeAssetReplacements,
+  mergeConfigOverrides,
+  scaleConfigRectValue
 } from "../src/watchfaces/watchfaceStudio.ts";
 
 function digitFiles(width, height, directory, folder) {
@@ -33,6 +39,18 @@ function resolution(width, digitWidth, digitHeight) {
       kcal_font: "",
       elevation_rect: "",
       elevation_font: "",
+      colon_icon: "icon\\colon.png",
+      time_hour_high_pos: `{${Math.round(width * 0.125)},${Math.round(width * 0.125)}}`,
+      time_hour_high_font: "13x19",
+      time_hour_low_pos: `{${Math.round(width * 0.2)},${Math.round(width * 0.125)}}`,
+      time_hour_low_font: "13x19",
+      time_minute_high_pos: `{${Math.round(width * 0.35)},${Math.round(width * 0.125)}}`,
+      time_minute_high_font: "13x19",
+      time_minute_low_pos: `{${Math.round(width * 0.425)},${Math.round(width * 0.125)}}`,
+      time_minute_low_font: "13x19",
+      english_date_week_rect: `{${Math.round(width * 0.1)},${Math.round(width * 0.4)},${Math.round(width * 0.3)},${Math.round(width * 0.48)},hcenter|vcenter}`,
+      english_date_month_rect: `{${Math.round(width * 0.4)},${Math.round(width * 0.4)},${Math.round(width * 0.48)},${Math.round(width * 0.48)},hcenter|vcenter}`,
+      english_date_day_rect: `{${Math.round(width * 0.5)},${Math.round(width * 0.4)},${Math.round(width * 0.58)},${Math.round(width * 0.48)},hcenter|vcenter}`,
       rect_control1_pos: `{${Math.round(width * 0.125)},${Math.round(width * 0.25)}}`,
       control_hr_rect: `{${Math.round(width * 0.2)},0,${Math.round(width * 0.36)},${digitHeight},hcenter|vcenter}`,
       control_hr_font: "13x19",
@@ -87,9 +105,82 @@ assert.equal(full.values.heartreate_level_font, "13x19");
 assert.equal(full.values.step_rect, "{474,576,694,640,hcenter|vcenter}");
 assert.equal(full.values.kcal_rect, "");
 assert.equal(full.values.kcal_font, "");
+assert.deepEqual(
+  mergeAssetReplacements(
+    [{ path: "watchface_800x800/01/00.png", dataUrl: "global" }],
+    [
+      { path: "watchface_800x800/01/00.png", dataUrl: "specific" },
+      { path: "watchface_800x800/01/01.png", dataUrl: "second" }
+    ]
+  ),
+  [
+    { path: "watchface_800x800/01/00.png", dataUrl: "specific" },
+    { path: "watchface_800x800/01/01.png", dataUrl: "second" }
+  ]
+);
+assert.equal(
+  scaleConfigRectValue(full.values.heartreate_level_rect, 1.5),
+  "{101,560,299,656,hcenter|vcenter}"
+);
 
 const withMetrics = applyConfigOverridesToDetails(details, metricOverrides);
+const inferredSeparators = inferStaticSeparators(withMetrics);
+assert.deepEqual(inferredSeparators.colon, {
+  enabled: false,
+  x: 242,
+  y: 132,
+  size: 64,
+  color: "#ffffff"
+});
+assert.deepEqual(inferredSeparators.dateSlash, {
+  enabled: false,
+  x: 392,
+  y: 352,
+  size: 64,
+  color: "#ffffff"
+});
+const staticSeparatorOverrides = buildStaticSeparatorOverrides(withMetrics, {
+  ...inferredSeparators,
+  colon: { ...inferredSeparators.colon, enabled: true }
+});
+assert.equal(staticSeparatorOverrides.length, 2);
+assert.equal(
+  staticSeparatorOverrides.find((entry) => entry.path.includes("800x800"))
+    ?.values.colon_icon,
+  ""
+);
+const metricStyleOverrides = buildMetricStyleOverrides(
+  withMetrics,
+  { heartRate: { color: "#ff3366", scale: 1.5 } },
+  true
+);
+const fullMetricStyle = metricStyleOverrides.find((entry) =>
+  entry.path.includes("800x800")
+);
+assert.equal(
+  fullMetricStyle?.values.heartreate_level_rect,
+  "{101,560,299,656,hcenter|vcenter}"
+);
+assert.equal(fullMetricStyle?.values.heartreate_level_font, "studio/heartRate");
+const timeStyleOverrides = buildTimeStyleOverrides(
+  withMetrics,
+  { hours: { color: "#33ddff", scale: 1.5 } },
+  true
+);
+const fullTimeStyle = timeStyleOverrides.find((entry) =>
+  entry.path.includes("800x800")
+);
+assert.equal(fullTimeStyle?.values.time_hour_high_pos, "{74,84}");
+assert.equal(fullTimeStyle?.values.time_hour_low_pos, "{164,84}");
+assert.equal(fullTimeStyle?.values.time_hour_high_font, "studio/hours-high");
+assert.equal(fullTimeStyle?.values.time_hour_low_font, "studio/hours-low");
 const fullBounds = computeLayoutGroupBounds(withMetrics.resolutions[1]);
+assert.deepEqual(
+  fullBounds.filter((entry) =>
+    ["hours", "minutes", "weekday", "dateMonth", "dateDay"].includes(entry.id)
+  ).map((entry) => entry.id),
+  ["hours", "minutes", "weekday", "dateMonth", "dateDay"]
+);
 assert.deepEqual(
   fullBounds.find((entry) => entry.id === "complication"),
   {
@@ -110,6 +201,8 @@ assert.deepEqual(fullLimits.heartRate, {
 });
 assert.equal(fullLimits.heartRate.minDy < -400, true);
 const layoutOverrides = buildLayoutOverrides(withMetrics, {
+  hours: { dx: -50, dy: 10 },
+  weekday: { dx: 20, dy: -30 },
   heartRate: { dx: 10, dy: 20 },
   complication: { dx: 20, dy: 30 }
 });
@@ -119,6 +212,11 @@ assert.equal(
   "{144,596,276,660,hcenter|vcenter}"
 );
 assert.equal(shiftedFull?.values.rect_control1_pos, "{120,230}");
+assert.equal(shiftedFull?.values.time_hour_high_pos, "{50,110}");
+assert.equal(
+  shiftedFull?.values.english_date_week_rect,
+  "{100,290,260,354,hcenter|vcenter}"
+);
 const shiftedCompact = layoutOverrides.find((entry) => entry.path.includes("416x416"));
 assert.equal(
   shiftedCompact?.values.heartreate_level_rect,

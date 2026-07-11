@@ -194,9 +194,11 @@ export interface CorosWatchfaceConfigOverride {
 }
 
 export interface CorosWatchfaceAssetReplacement {
-  /** Zip entry path inside the selected template archive. */
+  /** Zip entry path inside the selected template archive or a studio sprite path. */
   path: string;
   dataUrl: string;
+  /** Adds a new isolated sprite instead of replacing a template entry. */
+  create?: boolean;
 }
 
 /** One PNG inside a template archive, addressed by its zip entry path. */
@@ -266,6 +268,60 @@ export interface CorosWatchfaceArtwork {
   dataUrl: string;
   width: number;
   height: number;
+}
+
+export interface CorosWatchfaceDesignSprite {
+  id: string;
+  dataUrl: string;
+  sourceWidth: number;
+  sourceHeight: number;
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+}
+
+export interface CorosWatchfaceDesignState {
+  version: 1;
+  backgroundColor: string;
+  accentColor: string;
+  artwork: CorosWatchfaceArtwork | null;
+  zoom: number;
+  fontFamily: string;
+  digitColor: string;
+  tintLabels: boolean;
+  tintIcons: boolean;
+  previewComplication: string;
+  metricChanges: Record<string, boolean>;
+  metricStyles: Record<string, { color: string; scale: number }>;
+  timeStyles: Record<string, { color: string; scale: number }>;
+  staticSeparators: Record<
+    "colon" | "dateSlash",
+    { enabled: boolean; x: number; y: number; size: number; color: string }
+  >;
+  layoutOffsets: Record<string, { dx: number; dy: number }>;
+  designSprites: CorosWatchfaceDesignSprite[];
+}
+
+export interface CorosWatchfaceProjectSummary {
+  projectId: string;
+  name: string;
+  updatedAt: string;
+  sourceTemplateId: number;
+}
+
+export interface CorosWatchfaceProjectSaveInput {
+  projectId?: string;
+  name: string;
+  sourceArchiveId: string;
+  design: CorosWatchfaceDesignState;
+}
+
+export interface CorosWatchfaceProject extends CorosWatchfaceProjectSummary {
+  archive: CorosWatchfaceArchive;
+  design: CorosWatchfaceDesignState;
 }
 
 /** The official COROS hand-off link and an offline QR image for opening it. */

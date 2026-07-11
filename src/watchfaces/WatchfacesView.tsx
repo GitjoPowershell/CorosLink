@@ -13,11 +13,14 @@ import {
   Search,
   Send,
   ShieldCheck,
+  Trash2,
   Upload,
   Watch
 } from "lucide-react";
 import type {
   CorosWatchfaceArchive,
+  CorosWatchfaceProject,
+  CorosWatchfaceProjectSummary,
   CorosWatchfaceShareLink,
   CorosWatchfaceStatus,
   CorosWatchfaceTheme
@@ -37,6 +40,12 @@ export function WatchfacesView({ api }: WatchfacesViewProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [archive, setArchive] = useState<CorosWatchfaceArchive | null>(null);
+  const [starterArchive, setStarterArchive] =
+    useState<CorosWatchfaceArchive | null>(null);
+  const [projects, setProjects] = useState<CorosWatchfaceProjectSummary[]>([]);
+  const [loadedProject, setLoadedProject] = useState<CorosWatchfaceProject | null>(
+    null
+  );
   const [name, setName] = useState("");
   const [firmwareType, setFirmwareType] = useState(DEFAULT_FIRMWARE_TYPE);
   const [backgroundImageId, setBackgroundImageId] = useState("13");
@@ -49,7 +58,9 @@ export function WatchfacesView({ api }: WatchfacesViewProps) {
     null
   );
   const [downloadingThemeUrl, setDownloadingThemeUrl] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"login" | "themes" | "archive" | "publish" | null>(
+  const [busy, setBusy] = useState<
+    "login" | "themes" | "archive" | "publish" | "project" | null
+  >(
     null
   );
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +71,13 @@ export function WatchfacesView({ api }: WatchfacesViewProps) {
       .getCorosWatchfaceStatus()
       .then(setStatus)
       .catch((caught) => setError(toErrorMessage(caught)));
+  }, [api]);
+
+  useEffect(() => {
+    void api
+      .listCorosWatchfaceProjects()
+      .then(setProjects)
+      .catch(() => undefined);
   }, [api]);
 
   const connected = Boolean(status?.authenticated);
@@ -98,6 +116,8 @@ export function WatchfacesView({ api }: WatchfacesViewProps) {
     try {
       setStatus(await api.logoutCorosWatchfaces());
       setArchive(null);
+      setStarterArchive(null);
+      setLoadedProject(null);
       setShareLink(null);
       setThemes([]);
       setThemesLoaded(false);
@@ -149,6 +169,8 @@ export function WatchfacesView({ api }: WatchfacesViewProps) {
       });
       if (download.usableAsTemplate && download.archive) {
         setArchive(download.archive);
+        setStarterArchive(download.archive);
+        setLoadedProject(null);
         setName(theme.name);
         setShareLink(null);
         setNotice(
@@ -178,9 +200,46 @@ export function WatchfacesView({ api }: WatchfacesViewProps) {
         return;
       }
       setArchive(selected);
+      setStarterArchive(selected);
+      setLoadedProject(null);
       setName(selected.fileName.replace(/\.(zip|dat)$/i, "") || "Custom watchface");
       setShareLink(null);
       setNotice("Archive validated. Review the template details, then publish.");
+    } catch (caught) {
+      setError(toErrorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleLoadProject(projectId: string) {
+    setBusy("project");
+    setError(null);
+    setNotice(null);
+    try {
+      const project = await api.loadCorosWatchfaceProject(projectId);
+      setLoadedProject(project);
+      setStarterArchive(project.archive);
+      setArchive(project.archive);
+      setName(project.name);
+      setShareLink(null);
+      setNotice(`Opened project “${project.name}”.`);
+    } catch (caught) {
+      setError(toErrorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleDeleteProject(projectId: string) {
+    setBusy("project");
+    setError(null);
+    try {
+      await api.deleteCorosWatchfaceProject(projectId);
+      setProjects((current) =>
+        current.filter((project) => project.projectId !== projectId)
+      );
+      setNotice("Saved watchface project deleted.");
     } catch (caught) {
       setError(toErrorMessage(caught));
     } finally {
@@ -309,6 +368,60 @@ export function WatchfacesView({ api }: WatchfacesViewProps) {
             >
               <LogOut size={16} /> Disconnect
             </button>
+          </section>
+
+          <section className="panel watchface-projects-panel">
+            <div className="watchfaces-panel-heading">
+              <span className="watchfaces-panel-icon"><FileArchive size={20} /></span>
+              <div>
+                <p className="eyebrow">Saved locally</p>
+                <h2>Watchface projects</h2>
+              </div>
+            </div>
+            <p className="watchfaces-muted">
+              Open a saved project to restore its starter template, artwork,
+              sprites, colors, positions, and component settings.
+            </p>
+            {projects.length > 0 ? (
+              <div className="watchface-project-list">
+                {projects.map((project) => (
+                  <article
+                    className={`watchface-project-card ${loadedProject?.projectId === project.projectId ? "active" : ""}`}
+                    key={project.projectId}
+                  >
+                    <div>
+                      <strong>{project.name}</strong>
+                      <span>
+                        Template {project.sourceTemplateId} · {new Date(project.updatedAt).toLocaleString()}
+                      </span>
+                    </div>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => void handleLoadProject(project.projectId)}
+                    >
+                      {busy === "project" ? <Loader2 className="spin" size={14} /> : <FileArchive size={14} />}
+                      Open
+                    </button>
+                    <button
+                      className="icon-button"
+                      type="button"
+                      aria-label={`Delete ${project.name}`}
+                      disabled={busy !== null}
+                      onClick={() => void handleDeleteProject(project.projectId)}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="watchfaces-empty-themes">
+                No saved projects yet. Choose a template and use Save project
+                in the designer.
+              </p>
+            )}
           </section>
 
           <BatteryHistoryPanel api={api} disabled={busy !== null} />
@@ -443,15 +556,30 @@ export function WatchfacesView({ api }: WatchfacesViewProps) {
             ) : null}
           </section>
 
-          {archive ? (
+          {starterArchive ? (
             <WatchfaceCreator
               api={api}
-              starterArchive={archive}
+              starterArchive={starterArchive}
+              initialProject={loadedProject}
               disabled={busy !== null}
               onCreated={(created) => {
                 setArchive(created);
                 setName("My custom face");
                 setShareLink(null);
+              }}
+              onProjectSaved={(saved) => {
+                const summary: CorosWatchfaceProjectSummary = {
+                  projectId: saved.projectId,
+                  name: saved.name,
+                  updatedAt: saved.updatedAt,
+                  sourceTemplateId: saved.sourceTemplateId
+                };
+                setProjects((current) => [
+                  summary,
+                  ...current.filter(
+                    (project) => project.projectId !== summary.projectId
+                  )
+                ]);
               }}
               onError={setError}
               onNotice={setNotice}

@@ -89,6 +89,9 @@ import type {
   CorosWatchfaceArchive,
   CorosWatchfaceArtwork,
   CorosWatchfaceCreatorInput,
+  CorosWatchfaceProject,
+  CorosWatchfaceProjectSaveInput,
+  CorosWatchfaceProjectSummary,
   CorosWatchfacePublishInput,
   CorosWatchfaceShareLink,
   CorosWatchfaceStatus,
@@ -137,6 +140,18 @@ const api = {
     input: CorosWatchfaceCreatorInput
   ): Promise<CorosWatchfaceArchive> =>
     ipcRenderer.invoke("watchfaces:createArchive", input),
+  listCorosWatchfaceProjects: (): Promise<CorosWatchfaceProjectSummary[]> =>
+    ipcRenderer.invoke("watchfaces:listProjects"),
+  saveCorosWatchfaceProject: (
+    input: CorosWatchfaceProjectSaveInput
+  ): Promise<CorosWatchfaceProject> =>
+    ipcRenderer.invoke("watchfaces:saveProject", input),
+  loadCorosWatchfaceProject: (
+    projectId: string
+  ): Promise<CorosWatchfaceProject> =>
+    ipcRenderer.invoke("watchfaces:loadProject", projectId),
+  deleteCorosWatchfaceProject: (projectId: string): Promise<void> =>
+    ipcRenderer.invoke("watchfaces:deleteProject", projectId),
   describeCorosWatchfaceTemplate: (
     archiveId: string
   ): Promise<CorosWatchfaceTemplateDetails> =>

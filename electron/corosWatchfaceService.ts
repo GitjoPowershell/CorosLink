@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { nativeImage, safeStorage } from "electron";
+import { app, nativeImage, safeStorage } from "electron";
 import QRCode from "qrcode";
 import { deleteSettings, getSetting, setSetting } from "./database";
 import { createStoreZip } from "./zipStore";
@@ -13,6 +13,9 @@ import type {
   CorosWatchfaceConfigOverride,
   CorosWatchfaceCreatorInput,
   CorosWatchfacePublishInput,
+  CorosWatchfaceProject,
+  CorosWatchfaceProjectSaveInput,
+  CorosWatchfaceProjectSummary,
   CorosWatchfaceResolutionDetails,
   CorosWatchfaceShareLink,
   CorosWatchfaceSpriteFile,
@@ -42,6 +45,7 @@ const API_SUCCESS = "0000";
 const MAX_ARCHIVE_BYTES = 25 * 1024 * 1024;
 const MAX_INFO_BYTES = 1024 * 1024;
 const MAX_ARTWORK_BYTES = 10 * 1024 * 1024;
+const MAX_PROJECT_BYTES = 60 * 1024 * 1024;
 const CREATOR_CANVAS_SIZE = 800;
 const MAX_SPRITE_REPLACEMENTS = 800;
 const MAX_SPRITE_BYTES = 2 * 1024 * 1024;
@@ -50,6 +54,8 @@ const MAX_TEMPLATE_ASSET_REQUESTS = 800;
 const MAX_CONFIG_OVERRIDE_FILES = 8;
 const MAX_CONFIG_OVERRIDE_KEYS = 200;
 const CONFIG_KEY_PATTERN = /^[a-z0-9_]{1,64}$/i;
+const CREATED_STUDIO_SPRITE_PATTERN =
+  /^watchface_(?:416x416|800x800)\/studio\/[a-z0-9_-]{1,64}\/\d{2}\.png$/i;
 // Values stay on one printable-ASCII line, matching the firmware's own syntax.
 const CONFIG_VALUE_PATTERN = /^[\x20-\x7e]{0,160}$/;
 
@@ -488,6 +494,157 @@ export async function selectCorosWatchfaceArchive(
   return toPublicArchive(selected);
 }
 
+interface StoredWatchfaceProject {
+  projectId: string;
+  name: string;
+  updatedAt: string;
+  sourceTemplateId: number;
+  design: CorosWatchfaceProjectSaveInput["design"];
+}
+
+function watchfaceProjectsDirectory(): string {
+  return path.join(app.getPath("userData"), "watchface-projects");
+}
+
+function validateProjectId(value: string | undefined): string {
+  if (value === undefined) {
+    return crypto.randomUUID();
+  }
+  if (!/^[a-f0-9-]{36}$/i.test(value)) {
+    throw new Error("The saved watchface project ID is invalid.");
+  }
+  return value;
+}
+
+function validateProjectDesign(
+  design: CorosWatchfaceProjectSaveInput["design"]
+): string {
+  if (!design || typeof design !== "object" || design.version !== 1) {
+    throw new Error("The watchface project design is invalid.");
+  }
+  const encoded = JSON.stringify(design);
+  if (Buffer.byteLength(encoded, "utf8") > MAX_PROJECT_BYTES) {
+    throw new Error("The watchface project is too large to save.");
+  }
+  return encoded;
+}
+
+function sanitizeProjectName(value: string): string {
+  const name = value.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  if (!name || name.length > 80) {
+    throw new Error("Project names must contain between 1 and 80 characters.");
+  }
+  return name;
+}
+
+async function readStoredWatchfaceProject(
+  projectId: string
+): Promise<StoredWatchfaceProject> {
+  const id = validateProjectId(projectId);
+  const manifestPath = path.join(watchfaceProjectsDirectory(), id, "project.json");
+  const stat = await fs.promises.stat(manifestPath);
+  if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_PROJECT_BYTES) {
+    throw new Error("The saved watchface project is unreadable.");
+  }
+  const parsed = JSON.parse(
+    await fs.promises.readFile(manifestPath, "utf8")
+  ) as StoredWatchfaceProject;
+  if (
+    parsed.projectId !== id ||
+    typeof parsed.name !== "string" ||
+    typeof parsed.updatedAt !== "string" ||
+    !Number.isSafeInteger(parsed.sourceTemplateId) ||
+    !parsed.design ||
+    parsed.design.version !== 1
+  ) {
+    throw new Error("The saved watchface project metadata is invalid.");
+  }
+  return parsed;
+}
+
+export async function saveCorosWatchfaceProject(
+  input: CorosWatchfaceProjectSaveInput
+): Promise<CorosWatchfaceProject> {
+  if (!input || typeof input.sourceArchiveId !== "string") {
+    throw new Error("Choose a starter template before saving the project.");
+  }
+  const source = requireSelectedArchive(input.sourceArchiveId);
+  const projectId = validateProjectId(input.projectId);
+  const name = sanitizeProjectName(input.name);
+  validateProjectDesign(input.design);
+  const projectDirectory = path.join(watchfaceProjectsDirectory(), projectId);
+  const templatePath = path.join(projectDirectory, "starter.dat");
+  const manifestPath = path.join(projectDirectory, "project.json");
+  await fs.promises.mkdir(projectDirectory, { recursive: true });
+  if (path.resolve(source.path) !== path.resolve(templatePath)) {
+    const temporaryTemplate = `${templatePath}.tmp`;
+    await fs.promises.copyFile(source.path, temporaryTemplate);
+    await fs.promises.rename(temporaryTemplate, templatePath);
+  }
+  const updatedAt = new Date().toISOString();
+  const stored: StoredWatchfaceProject = {
+    projectId,
+    name,
+    updatedAt,
+    sourceTemplateId: source.sourceTemplateId,
+    design: input.design
+  };
+  const temporaryManifest = `${manifestPath}.tmp`;
+  await fs.promises.writeFile(temporaryManifest, JSON.stringify(stored), "utf8");
+  await fs.promises.rename(temporaryManifest, manifestPath);
+  const selected = await inspectArchive(templatePath);
+  selectedArchives.set(selected.archiveId, selected);
+  return { ...stored, archive: toPublicArchive(selected) };
+}
+
+export async function listCorosWatchfaceProjects(): Promise<
+  CorosWatchfaceProjectSummary[]
+> {
+  const directory = watchfaceProjectsDirectory();
+  await fs.promises.mkdir(directory, { recursive: true });
+  const entries = await fs.promises.readdir(directory, { withFileTypes: true });
+  const projects = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .map(async (entry) => {
+        try {
+          const stored = await readStoredWatchfaceProject(entry.name);
+          const { design: _design, ...summary } = stored;
+          return summary;
+        } catch {
+          return null;
+        }
+      })
+  );
+  return projects
+    .filter((project): project is CorosWatchfaceProjectSummary => Boolean(project))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+export async function loadCorosWatchfaceProject(
+  projectId: string
+): Promise<CorosWatchfaceProject> {
+  const stored = await readStoredWatchfaceProject(projectId);
+  const templatePath = path.join(
+    watchfaceProjectsDirectory(),
+    stored.projectId,
+    "starter.dat"
+  );
+  const selected = await inspectArchive(templatePath);
+  selectedArchives.set(selected.archiveId, selected);
+  return { ...stored, archive: toPublicArchive(selected) };
+}
+
+export async function deleteCorosWatchfaceProject(
+  projectId: string
+): Promise<void> {
+  const id = validateProjectId(projectId);
+  await fs.promises.rm(path.join(watchfaceProjectsDirectory(), id), {
+    recursive: true,
+    force: true
+  });
+}
+
 /**
  * Import a user-selected image as an editor asset. It stays renderer-visible
  * only as a resized data URL; the original path never crosses the IPC bridge.
@@ -840,6 +997,7 @@ interface DecodedSpriteReplacement {
   data: Buffer;
   width: number;
   height: number;
+  create: boolean;
 }
 
 function decodeSpriteReplacements(
@@ -863,6 +1021,9 @@ function decodeSpriteReplacements(
     ) {
       throw new Error("Sprite replacements must be PNG images with template paths.");
     }
+    if (replacement.create && !CREATED_STUDIO_SPRITE_PATTERN.test(replacement.path)) {
+      throw new Error("New sprites must use a watchface resolution studio folder.");
+    }
     if (decoded.has(replacement.path)) {
       throw new Error("Sprite replacements contain a duplicated template path.");
     }
@@ -878,7 +1039,11 @@ function decodeSpriteReplacements(
     if (image.isEmpty()) {
       throw new Error("A sprite replacement could not be decoded as an image.");
     }
-    decoded.set(replacement.path, { data, ...image.getSize() });
+    decoded.set(replacement.path, {
+      data,
+      ...image.getSize(),
+      create: replacement.create === true
+    });
   }
   return decoded;
 }
@@ -1433,7 +1598,11 @@ async function rewriteTemplateArchive(
     }
   }
   for (const spritePath of spriteReplacements.keys()) {
-    if (!sourcePaths.has(spritePath)) {
+    const sprite = spriteReplacements.get(spritePath)!;
+    if (sprite.create && sourcePaths.has(spritePath)) {
+      throw new Error("A new studio sprite collides with a starter template entry.");
+    }
+    if (!sprite.create && !sourcePaths.has(spritePath)) {
       throw new Error("A sprite replacement does not exist in the starter template.");
     }
     if (replacements.has(spritePath) || spritePath.toLowerCase().endsWith("/custom_bg.png")) {
@@ -1502,6 +1671,11 @@ async function rewriteTemplateArchive(
       return { name: entry.path, data: sprite.data };
     })
   );
+  for (const [spritePath, sprite] of spriteReplacements) {
+    if (sprite.create) {
+      entries.push({ name: spritePath, data: sprite.data });
+    }
+  }
   return createStoreZip(entries);
 }
 

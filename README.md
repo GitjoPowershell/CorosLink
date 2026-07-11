@@ -191,8 +191,22 @@ then claim it through COROS's official share page on iPhone.
   regenerated (AOD sprites are auto-dimmed) at the template's exact pixel sizes
 - **Live sprite preview** — the on-screen face is composited from the same
   sprite bitmaps and `config.txt` layout the watch itself will render
-- **Drag-to-move layout (experimental)** — drag the time, date, battery, and
-  metric elements directly on the preview; CorosLink rewrites the matching
+- **Independent time styling** — resize and recolor hour and minute bitmap
+  sprites separately while keeping each two-digit group centered
+- **Draggable static separators (experimental)** — replace the template-anchored
+  time colon and date slash with background-rendered separators that support
+  exact X/Y, size, color, and direct preview dragging
+- **Custom design sprites** — import up to twelve static PNG/JPEG/WebP layers,
+  then drag, scale, rotate, position, and remove them before they are composited
+  into the generated watchface background
+- **Persistent watchface projects** — save the starter `.dat` together with
+  artwork, custom sprites, component styles, separators, and layout offsets;
+  reopen the project after restarting CorosLink and continue editing
+- **Per-metric bitmap styling (experimental)** — give fixed heart-rate, steps,
+  calorie, and elevation values their own color and 50–200% sprite scale;
+  CorosLink generates an isolated ten-digit folder for each customized metric
+- **Drag-to-move layout (experimental)** — position hours, minutes, weekday,
+  month, day, battery, and metric elements independently; CorosLink rewrites the matching
   `config.txt` position keys for every resolution (scaled automatically),
   leaving the always-on-display layout untouched
 - **Live metric studio (experimental)** — activate fixed heart rate, steps,

@@ -88,6 +88,9 @@ import type {
   CorosWatchfaceArchive,
   CorosWatchfaceArtwork,
   CorosWatchfaceCreatorInput,
+  CorosWatchfaceProject,
+  CorosWatchfaceProjectSaveInput,
+  CorosWatchfaceProjectSummary,
   CorosWatchfacePublishInput,
   CorosWatchfaceShareLink,
   CorosWatchfaceStatus,
@@ -126,6 +129,14 @@ export interface CorosLinkApi {
   createCorosWatchfaceArchive: (
     input: CorosWatchfaceCreatorInput
   ) => Promise<CorosWatchfaceArchive>;
+  listCorosWatchfaceProjects: () => Promise<CorosWatchfaceProjectSummary[]>;
+  saveCorosWatchfaceProject: (
+    input: CorosWatchfaceProjectSaveInput
+  ) => Promise<CorosWatchfaceProject>;
+  loadCorosWatchfaceProject: (
+    projectId: string
+  ) => Promise<CorosWatchfaceProject>;
+  deleteCorosWatchfaceProject: (projectId: string) => Promise<void>;
   describeCorosWatchfaceTemplate: (
     archiveId: string
   ) => Promise<CorosWatchfaceTemplateDetails>;

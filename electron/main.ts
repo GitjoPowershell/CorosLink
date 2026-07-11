@@ -65,9 +65,13 @@ import {
   listCorosWatchfaceThemes,
   loadCorosWatchfaceArtwork,
   loadCorosWatchfaceTemplateAssets,
+  loadCorosWatchfaceProject,
   loginCorosWatchfaces,
   logoutCorosWatchfaces,
+  listCorosWatchfaceProjects,
   publishCorosWatchface,
+  saveCorosWatchfaceProject,
+  deleteCorosWatchfaceProject,
   selectCorosWatchfaceArchive
 } from "./corosWatchfaceService";
 import {
@@ -631,6 +635,16 @@ function registerIpcHandlers(): void {
     "watchfaces:createArchive",
     (_event, input: CorosWatchfaceCreatorInput) =>
       createCorosWatchfaceArchive(input)
+  );
+  ipcMain.handle("watchfaces:listProjects", () => listCorosWatchfaceProjects());
+  ipcMain.handle("watchfaces:saveProject", (_event, input) =>
+    saveCorosWatchfaceProject(input)
+  );
+  ipcMain.handle("watchfaces:loadProject", (_event, projectId: string) =>
+    loadCorosWatchfaceProject(projectId)
+  );
+  ipcMain.handle("watchfaces:deleteProject", (_event, projectId: string) =>
+    deleteCorosWatchfaceProject(projectId)
   );
 
   ipcMain.handle(

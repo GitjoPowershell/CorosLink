@@ -21,6 +21,10 @@ export interface WatchfaceStudioOptions {
   tintIcons: boolean;
   /** Changes only the studio preview; the watch rotates the control slot. */
   previewComplication?: WatchfaceComplicationId;
+  /** Per-fixed-metric bitmap styles, isolated into their own sprite folders. */
+  metricStyles?: WatchfaceMetricStyles;
+  /** Independent hour/minute bitmap styles. */
+  timeStyles?: WatchfaceTimeStyles;
 }
 
 export type WatchfaceAssetLoader = (
@@ -64,6 +68,97 @@ export function parseConfigRect(
         y1: Number(match[4])
       }
     : null;
+}
+
+export type WatchfaceStaticSeparatorId = "colon" | "dateSlash";
+
+export interface WatchfaceStaticSeparatorStyle {
+  enabled: boolean;
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+}
+
+export type WatchfaceStaticSeparators = Record<
+  WatchfaceStaticSeparatorId,
+  WatchfaceStaticSeparatorStyle
+>;
+
+/** Suggested separator centers inferred from the surrounding template fields. */
+export function inferStaticSeparators(
+  details: CorosWatchfaceTemplateDetails,
+  color = "#ffffff"
+): WatchfaceStaticSeparators {
+  const resolution = pickPreviewResolution(details);
+  const fallbackWidth = resolution?.width ?? 800;
+  const fallbackHeight = resolution?.height ?? 800;
+  const fallback: WatchfaceStaticSeparators = {
+    colon: {
+      enabled: false,
+      x: fallbackWidth / 2,
+      y: fallbackHeight * 0.4,
+      size: Math.round(fallbackHeight * 0.08),
+      color
+    },
+    dateSlash: {
+      enabled: false,
+      x: fallbackWidth / 2,
+      y: fallbackHeight * 0.3,
+      size: Math.round(fallbackHeight * 0.06),
+      color
+    }
+  };
+  if (!resolution) {
+    return fallback;
+  }
+  const config = resolution.config;
+  const hourPos = parseConfigPos(config["time_hour_low_pos"]);
+  const minutePos = parseConfigPos(config["time_minute_high_pos"]);
+  const hourSource = findSpriteFolder(resolution, config["time_hour_low_font"]);
+  const minuteSource = findSpriteFolder(resolution, config["time_minute_high_font"]);
+  const hourFile = hourSource?.files[0];
+  const minuteFile = minuteSource?.files[0];
+  if (hourPos && minutePos && hourFile && minuteFile) {
+    fallback.colon.x = Math.round(
+      (hourPos.x + hourFile.width + minutePos.x) / 2
+    );
+    fallback.colon.y = Math.round(
+      (hourPos.y + hourFile.height / 2 + minutePos.y + minuteFile.height / 2) / 2
+    );
+    fallback.colon.size = Math.max(hourFile.height, minuteFile.height);
+  }
+  const monthRect = parseConfigRect(config["english_date_month_rect"]);
+  const dayRect = parseConfigRect(config["english_date_day_rect"]);
+  if (monthRect && dayRect) {
+    fallback.dateSlash.x = Math.round((monthRect.x1 + dayRect.x0) / 2);
+    fallback.dateSlash.y = Math.round(
+      (monthRect.y0 + monthRect.y1 + dayRect.y0 + dayRect.y1) / 4
+    );
+    fallback.dateSlash.size = Math.max(
+      12,
+      Math.round(Math.max(monthRect.y1 - monthRect.y0, dayRect.y1 - dayRect.y0))
+    );
+  }
+  return fallback;
+}
+
+/** Hides the firmware colon when a draggable static replacement is enabled. */
+export function buildStaticSeparatorOverrides(
+  details: CorosWatchfaceTemplateDetails,
+  separators: WatchfaceStaticSeparators
+): CorosWatchfaceConfigOverride[] {
+  if (!separators.colon.enabled) {
+    return [];
+  }
+  return details.resolutions.flatMap((resolution) =>
+    Object.prototype.hasOwnProperty.call(resolution.config, "colon_icon")
+      ? [{
+          path: `${resolution.directory}/config.txt`,
+          values: { colon_icon: "" }
+        }]
+      : []
+  );
 }
 
 /**
@@ -115,6 +210,16 @@ export async function tintSprite(
   height: number,
   color: string
 ): Promise<string> {
+  return resizeAndTintSprite(dataUrl, width, height, color);
+}
+
+/** Resizes a source bitmap and optionally recolors its non-transparent pixels. */
+export async function resizeAndTintSprite(
+  dataUrl: string,
+  width: number,
+  height: number,
+  color?: string
+): Promise<string> {
   const image = await loadStudioImage(dataUrl);
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -124,9 +229,11 @@ export async function tintSprite(
     throw new Error("Sprite tinting is unavailable in this window.");
   }
   context.drawImage(image, 0, 0, width, height);
-  context.globalCompositeOperation = "source-in";
-  context.fillStyle = color;
-  context.fillRect(0, 0, width, height);
+  if (color) {
+    context.globalCompositeOperation = "source-in";
+    context.fillStyle = color;
+    context.fillRect(0, 0, width, height);
+  }
   return canvas.toDataURL("image/png");
 }
 
@@ -260,6 +367,51 @@ export type WatchfaceMetricId =
   | "steps"
   | "calories"
   | "elevation";
+
+export interface WatchfaceMetricSpriteStyle {
+  color: string;
+  /** Scale relative to the source template digit sprites. */
+  scale: number;
+}
+
+export type WatchfaceMetricStyles = Partial<
+  Record<WatchfaceMetricId, WatchfaceMetricSpriteStyle>
+>;
+
+export type WatchfaceTimePartId = "hours" | "minutes";
+
+export type WatchfaceTimeStyles = Partial<
+  Record<WatchfaceTimePartId, WatchfaceMetricSpriteStyle>
+>;
+
+interface WatchfaceTimePartDefinition {
+  id: WatchfaceTimePartId;
+  label: string;
+  digits: {
+    slot: "high" | "low";
+    posKey: string;
+    fontKey: string;
+  }[];
+}
+
+export const WATCHFACE_TIME_PARTS: WatchfaceTimePartDefinition[] = [
+  {
+    id: "hours",
+    label: "Hours",
+    digits: [
+      { slot: "high", posKey: "time_hour_high_pos", fontKey: "time_hour_high_font" },
+      { slot: "low", posKey: "time_hour_low_pos", fontKey: "time_hour_low_font" }
+    ]
+  },
+  {
+    id: "minutes",
+    label: "Minutes",
+    digits: [
+      { slot: "high", posKey: "time_minute_high_pos", fontKey: "time_minute_high_font" },
+      { slot: "low", posKey: "time_minute_low_pos", fontKey: "time_minute_low_font" }
+    ]
+  }
+];
 
 export type WatchfaceComplicationId =
   | "heartRate"
@@ -452,6 +604,232 @@ export function buildMetricOverrides(
   return overrides;
 }
 
+/** Scales a firmware rect around its center while preserving alignment flags. */
+export function scaleConfigRectValue(value: string, scale: number): string | null {
+  const match = value.match(
+    /^\{\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*((?:,[^}]*)?)\}$/
+  );
+  if (!match) {
+    return null;
+  }
+  const x0 = Number(match[1]);
+  const y0 = Number(match[2]);
+  const x1 = Number(match[3]);
+  const y1 = Number(match[4]);
+  const normalizedScale = Math.max(0.5, Math.min(2, scale));
+  const centerX = (x0 + x1) / 2;
+  const centerY = (y0 + y1) / 2;
+  const width = Math.max(1, Math.round((x1 - x0) * normalizedScale));
+  const height = Math.max(1, Math.round((y1 - y0) * normalizedScale));
+  const nextX0 = Math.round(centerX - width / 2);
+  const nextY0 = Math.round(centerY - height / 2);
+  return `{${nextX0},${nextY0},${nextX0 + width},${nextY0 + height}${match[5]}}`;
+}
+
+/**
+ * Config changes for per-metric sprite sizes. Export mode also points each
+ * metric at its dedicated generated bitmap folder.
+ */
+export function buildMetricStyleOverrides(
+  details: CorosWatchfaceTemplateDetails,
+  styles: WatchfaceMetricStyles,
+  useStudioFolders = false
+): CorosWatchfaceConfigOverride[] {
+  const overrides: CorosWatchfaceConfigOverride[] = [];
+  for (const resolution of details.resolutions) {
+    const values: Record<string, string> = {};
+    for (const metric of WATCHFACE_FIXED_METRICS) {
+      const style = styles[metric.id];
+      const rect = style
+        ? scaleConfigRectValue(resolution.config[metric.rectKey] ?? "", style.scale)
+        : null;
+      if (!style || !rect || !metricFontFolder(resolution, metric)) {
+        continue;
+      }
+      values[metric.rectKey] = rect;
+      if (useStudioFolders) {
+        values[metric.fontKey] = `studio/${metric.id}`;
+      }
+    }
+    if (Object.keys(values).length > 0) {
+      overrides.push({ path: `${resolution.directory}/config.txt`, values });
+    }
+  }
+  return overrides;
+}
+
+/** Generates an isolated ten-digit bitmap folder for every customized metric. */
+export async function buildMetricSpriteReplacements(
+  details: CorosWatchfaceTemplateDetails,
+  styles: WatchfaceMetricStyles,
+  fontFamily: string,
+  loadAssets: WatchfaceAssetLoader
+): Promise<CorosWatchfaceAssetReplacement[]> {
+  const jobs: {
+    source: CorosWatchfaceSpriteFile;
+    path: string;
+    digit: number;
+    width: number;
+    height: number;
+    color: string;
+  }[] = [];
+  for (const resolution of details.resolutions) {
+    for (const metric of WATCHFACE_FIXED_METRICS) {
+      const style = styles[metric.id];
+      const rect = parseConfigRect(resolution.config[metric.rectKey]);
+      const source = style ? metricFontFolder(resolution, metric) : null;
+      if (!style || !rect || !source) {
+        continue;
+      }
+      const normalizedScale = Math.max(0.5, Math.min(2, style.scale));
+      source.files.slice(0, 10).forEach((file, digit) => {
+        jobs.push({
+          source: file,
+          path: `${resolution.directory}/studio/${metric.id}/${String(digit).padStart(2, "0")}.png`,
+          digit,
+          width: Math.max(1, Math.round(file.width * normalizedScale)),
+          height: Math.max(1, Math.round(file.height * normalizedScale)),
+          color: style.color
+        });
+      });
+    }
+  }
+  const sourceAssets = fontFamily
+    ? []
+    : await loadAssets([...new Set(jobs.map((job) => job.source.path))]);
+  const assetsByPath = new Map(sourceAssets.map((asset) => [asset.path, asset]));
+  const replacements: CorosWatchfaceAssetReplacement[] = [];
+  for (const job of jobs) {
+    const dataUrl = fontFamily
+      ? renderDigitSprite(
+          String(job.digit),
+          job.width,
+          job.height,
+          fontFamily,
+          job.color
+        )
+      : await resizeAndTintSprite(
+          assetsByPath.get(job.source.path)?.dataUrl ?? "",
+          job.width,
+          job.height,
+          job.color
+        );
+    replacements.push({ path: job.path, dataUrl, create: true });
+  }
+  return replacements;
+}
+
+/** Resizes hour/minute positions around each two-digit group's own center. */
+export function buildTimeStyleOverrides(
+  details: CorosWatchfaceTemplateDetails,
+  styles: WatchfaceTimeStyles,
+  useStudioFolders = false
+): CorosWatchfaceConfigOverride[] {
+  const overrides: CorosWatchfaceConfigOverride[] = [];
+  for (const resolution of details.resolutions) {
+    const values: Record<string, string> = {};
+    for (const part of WATCHFACE_TIME_PARTS) {
+      const style = styles[part.id];
+      if (!style) {
+        continue;
+      }
+      const planned = part.digits.flatMap((digit) => {
+        const pos = parseConfigPos(resolution.config[digit.posKey]);
+        const source = findSpriteFolder(resolution, resolution.config[digit.fontKey]);
+        const sample = source?.files[0];
+        return pos && source && sample ? [{ digit, pos, source, sample }] : [];
+      });
+      if (planned.length !== part.digits.length) {
+        continue;
+      }
+      const x0 = Math.min(...planned.map((item) => item.pos.x));
+      const y0 = Math.min(...planned.map((item) => item.pos.y));
+      const x1 = Math.max(...planned.map((item) => item.pos.x + item.sample.width));
+      const y1 = Math.max(...planned.map((item) => item.pos.y + item.sample.height));
+      const centerX = (x0 + x1) / 2;
+      const centerY = (y0 + y1) / 2;
+      const normalizedScale = Math.max(0.5, Math.min(2, style.scale));
+      for (const item of planned) {
+        const x = Math.round(centerX + (item.pos.x - centerX) * normalizedScale);
+        const y = Math.round(centerY + (item.pos.y - centerY) * normalizedScale);
+        values[item.digit.posKey] = `{${x},${y}}`;
+        if (useStudioFolders) {
+          values[item.digit.fontKey] = `studio/${part.id}-${item.digit.slot}`;
+        }
+      }
+    }
+    if (Object.keys(values).length > 0) {
+      overrides.push({ path: `${resolution.directory}/config.txt`, values });
+    }
+  }
+  return overrides;
+}
+
+/** Generates isolated high/low digit folders for customized hours and minutes. */
+export async function buildTimeSpriteReplacements(
+  details: CorosWatchfaceTemplateDetails,
+  styles: WatchfaceTimeStyles,
+  fontFamily: string,
+  loadAssets: WatchfaceAssetLoader
+): Promise<CorosWatchfaceAssetReplacement[]> {
+  const jobs: {
+    source: CorosWatchfaceSpriteFile;
+    path: string;
+    digit: number;
+    width: number;
+    height: number;
+    color: string;
+  }[] = [];
+  for (const resolution of details.resolutions) {
+    for (const part of WATCHFACE_TIME_PARTS) {
+      const style = styles[part.id];
+      if (!style) {
+        continue;
+      }
+      const normalizedScale = Math.max(0.5, Math.min(2, style.scale));
+      for (const digit of part.digits) {
+        const source = findSpriteFolder(resolution, resolution.config[digit.fontKey]);
+        if (!source) {
+          continue;
+        }
+        source.files.slice(0, 10).forEach((file, value) => {
+          jobs.push({
+            source: file,
+            path: `${resolution.directory}/studio/${part.id}-${digit.slot}/${String(value).padStart(2, "0")}.png`,
+            digit: value,
+            width: Math.max(1, Math.round(file.width * normalizedScale)),
+            height: Math.max(1, Math.round(file.height * normalizedScale)),
+            color: style.color
+          });
+        });
+      }
+    }
+  }
+  const sourceAssets = fontFamily
+    ? []
+    : await loadAssets([...new Set(jobs.map((job) => job.source.path))]);
+  const assetsByPath = new Map(sourceAssets.map((asset) => [asset.path, asset]));
+  const replacements: CorosWatchfaceAssetReplacement[] = [];
+  for (const job of jobs) {
+    const dataUrl = fontFamily
+      ? renderDigitSprite(
+          String(job.digit),
+          job.width,
+          job.height,
+          fontFamily,
+          job.color
+        )
+      : await resizeAndTintSprite(
+          assetsByPath.get(job.source.path)?.dataUrl ?? "",
+          job.width,
+          job.height,
+          job.color
+        );
+    replacements.push({ path: job.path, dataUrl, create: true });
+  }
+  return replacements;
+}
+
 /** Applies config overrides to a details copy for live previewing. */
 export function applyConfigOverridesToDetails(
   details: CorosWatchfaceTemplateDetails,
@@ -486,14 +864,35 @@ export function mergeConfigOverrides(
 }
 
 /**
+ * Coalesces sprite jobs that target the same archive path. Later groups win,
+ * allowing component-specific styling to override a global font/tint pass.
+ */
+export function mergeAssetReplacements(
+  ...groups: CorosWatchfaceAssetReplacement[][]
+): CorosWatchfaceAssetReplacement[] {
+  const merged = new Map<string, CorosWatchfaceAssetReplacement>();
+  for (const group of groups) {
+    for (const replacement of group) {
+      merged.set(replacement.path, replacement);
+    }
+  }
+  return [...merged.values()];
+}
+
+/**
  * Movable element groups, matched against the template's own config keys.
  * Positions (`{x,y}`) and rects (`{x0,y0,x1,y1,align}`) are both shiftable.
  */
 export const WATCHFACE_LAYOUT_GROUPS: WatchfaceLayoutGroup[] = [
   {
-    id: "time",
-    label: "Time digits",
-    patterns: [/^time_(hour|minute)_(high|low)_pos$/]
+    id: "hours",
+    label: "Hour digits",
+    patterns: [/^time_hour_(high|low)_pos$/]
+  },
+  {
+    id: "minutes",
+    label: "Minute digits",
+    patterns: [/^time_minute_(high|low)_pos$/]
   },
   {
     id: "seconds",
@@ -501,9 +900,19 @@ export const WATCHFACE_LAYOUT_GROUPS: WatchfaceLayoutGroup[] = [
     patterns: [/^time_second_(high|low)_pos$/]
   },
   {
-    id: "date",
-    label: "Date & weekday",
-    patterns: [/^[a-z_]+_date_(month|day|week)_rect$/]
+    id: "weekday",
+    label: "Weekday",
+    patterns: [/^[a-z_]+_date_week_rect$/]
+  },
+  {
+    id: "dateMonth",
+    label: "Date month",
+    patterns: [/^[a-z_]+_date_month_rect$/]
+  },
+  {
+    id: "dateDay",
+    label: "Date day",
+    patterns: [/^[a-z_]+_date_day_rect$/]
   },
   {
     id: "battery",
@@ -850,19 +1259,31 @@ export async function drawStudioPreview(
     pos: { x: number; y: number } | null;
     source: PreviewDigitSource | null;
     digit: number;
+    partId: WatchfaceTimePartId;
   }[] = [];
-  const timeKeys: [string, string, string][] = [
-    ["time_hour_high_pos", "time_hour_high_font", hour[0]!],
-    ["time_hour_low_pos", "time_hour_low_font", hour[1]!],
-    ["time_minute_high_pos", "time_minute_high_font", minute[0]!],
-    ["time_minute_low_pos", "time_minute_low_font", minute[1]!]
+  const timeKeys: [string, string, string, WatchfaceTimePartId][] = [
+    ["time_hour_high_pos", "time_hour_high_font", hour[0]!, "hours"],
+    ["time_hour_low_pos", "time_hour_low_font", hour[1]!, "hours"],
+    ["time_minute_high_pos", "time_minute_high_font", minute[0]!, "minutes"],
+    ["time_minute_low_pos", "time_minute_low_font", minute[1]!, "minutes"]
   ];
-  for (const [posKey, fontKey, digitText] of timeKeys) {
+  for (const [posKey, fontKey, digitText, partId] of timeKeys) {
     const source = findSpriteFolder(resolution, config[fontKey]);
     digitPlan.push({
       pos: parseConfigPos(config[posKey]),
       source,
-      digit: Number(digitText)
+      digit: Number(digitText),
+      partId
+    });
+  }
+  const colonValue = config["colon_icon"]?.replace(/\\/g, "/");
+  const colonPath = colonValue ? `${resolution.directory}/${colonValue}` : null;
+  const colonFile = colonPath
+    ? resolution.icons.find((icon) => icon.path === colonPath) ?? null
+    : null;
+  if (colonFile) {
+    wantedSprites.set(colonFile.path, {
+      color: options.tintIcons ? options.accentColor : null
     });
   }
 
@@ -933,6 +1354,7 @@ export async function drawStudioPreview(
     rect: { x0: number; y0: number; x1: number; y1: number };
     source: PreviewDigitSource;
     value: string;
+    metricId?: WatchfaceMetricId;
   }[] = [];
   if (complication && complicationRect && complicationSource) {
     numberPlans.push({
@@ -941,11 +1363,35 @@ export async function drawStudioPreview(
       value: complication.sampleValue
     });
   }
+  const dateFields: [string, string, string][] = [
+    [
+      "english_date_month_rect",
+      "english_date_month_font",
+      String(now.getMonth() + 1).padStart(2, "0")
+    ],
+    [
+      "english_date_day_rect",
+      "english_date_day_font",
+      String(now.getDate()).padStart(2, "0")
+    ]
+  ];
+  for (const [rectKey, fontKey, value] of dateFields) {
+    const rect = parseConfigRect(config[rectKey]);
+    const source = findSpriteFolder(resolution, config[fontKey]);
+    if (rect && source) {
+      numberPlans.push({ rect, source, value });
+    }
+  }
   for (const metric of WATCHFACE_FIXED_METRICS) {
     const rect = parseConfigRect(config[metric.rectKey]);
     const source = findSpriteFolder(resolution, config[metric.fontKey]);
     if (rect && source) {
-      numberPlans.push({ rect, source, value: metric.sampleValue });
+      numberPlans.push({
+        rect,
+        source,
+        value: metric.sampleValue,
+        metricId: metric.id
+      });
     }
   }
 
@@ -969,9 +1415,11 @@ export async function drawStudioPreview(
   }
 
   const loaded = new Map<string, HTMLImageElement>();
+  const loadedAssets = new Map<string, CorosWatchfaceTemplateAsset>();
   if (wantedSprites.size > 0) {
     const assets = await loadAssets([...wantedSprites.keys()]);
     for (const asset of assets) {
+      loadedAssets.set(asset.path, asset);
       const tintColor = wantedSprites.get(asset.path)?.color ?? null;
       const dataUrl = tintColor
         ? await tintSprite(asset.dataUrl, asset.width, asset.height, tintColor)
@@ -1012,19 +1460,87 @@ export async function drawStudioPreview(
     }
   }
 
+  const styledTimeGlyphs = new Map<string, HTMLImageElement>();
   for (const planned of digitPlan) {
     const file = planned.source?.files[planned.digit];
     if (!file || !planned.pos) {
       continue;
     }
-    const image = digitSprites.get(file.path) ?? loaded.get(file.path);
+    const timeStyle = options.timeStyles?.[planned.partId];
+    const timeScale = timeStyle
+      ? Math.max(0.5, Math.min(2, timeStyle.scale))
+      : 1;
+    const width = Math.max(1, Math.round(file.width * timeScale));
+    const height = Math.max(1, Math.round(file.height * timeScale));
+    let image = digitSprites.get(file.path) ?? loaded.get(file.path);
+    if (timeStyle) {
+      const cacheKey = `${file.path}|${options.fontFamily}|${timeStyle.color}|${timeScale}`;
+      image = styledTimeGlyphs.get(cacheKey);
+      if (!image) {
+        const dataUrl = options.fontFamily
+          ? renderDigitSprite(
+              String(planned.digit),
+              width,
+              height,
+              options.fontFamily,
+              timeStyle.color
+            )
+          : await resizeAndTintSprite(
+              loadedAssets.get(file.path)?.dataUrl ?? "",
+              width,
+              height,
+              timeStyle.color
+            );
+        image = await loadStudioImage(dataUrl);
+        styledTimeGlyphs.set(cacheKey, image);
+      }
+    }
     if (image) {
       context.drawImage(
         image,
         planned.pos.x * scale,
         planned.pos.y * scale,
-        file.width * scale,
-        file.height * scale
+        width * scale,
+        height * scale
+      );
+    }
+  }
+
+  if (colonFile) {
+    const hourLow = digitPlan[1];
+    const minuteHigh = digitPlan[2];
+    const hourLowFile = hourLow?.source?.files[hourLow.digit];
+    const minuteHighFile = minuteHigh?.source?.files[minuteHigh.digit];
+    const image = loaded.get(colonFile.path);
+    if (
+      image &&
+      hourLow?.pos &&
+      minuteHigh?.pos &&
+      hourLowFile &&
+      minuteHighFile
+    ) {
+      const hourScale = Math.max(
+        0.5,
+        Math.min(2, options.timeStyles?.hours?.scale ?? 1)
+      );
+      const minuteScale = Math.max(
+        0.5,
+        Math.min(2, options.timeStyles?.minutes?.scale ?? 1)
+      );
+      const hourWidth = hourLowFile.width * hourScale;
+      const hourHeight = hourLowFile.height * hourScale;
+      const minuteHeight = minuteHighFile.height * minuteScale;
+      const hourCenterY = hourLow.pos.y + hourHeight / 2;
+      const minuteCenterY = minuteHigh.pos.y + minuteHeight / 2;
+      const gapCenterX =
+        (hourLow.pos.x + hourWidth + minuteHigh.pos.x) / 2;
+      const gapCenterY = (hourCenterY + minuteCenterY) / 2;
+      context.drawImage(
+        image,
+        (gapCenterX - colonFile.width / 2) * scale,
+        (gapCenterY - colonFile.height / 2) * scale,
+        colonFile.width * scale,
+        colonFile.height * scale
       );
     }
   }
@@ -1057,14 +1573,55 @@ export async function drawStudioPreview(
     }
   }
 
+  const styledMetricGlyphs = new Map<string, HTMLImageElement>();
   for (const plan of numberPlans) {
-    const glyphs = [...plan.value].flatMap((digit) => {
+    const metricStyle = plan.metricId
+      ? options.metricStyles?.[plan.metricId]
+      : undefined;
+    const glyphs: {
+      file: CorosWatchfaceSpriteFile;
+      image: HTMLImageElement;
+    }[] = [];
+    for (const digit of plan.value) {
       const file = plan.source.files[Number(digit)];
-      const image = file
-        ? digitSprites.get(file.path) ?? loaded.get(file.path)
-        : undefined;
-      return file && image ? [{ file, image }] : [];
-    });
+      if (!file) {
+        continue;
+      }
+      if (!metricStyle) {
+        const image = digitSprites.get(file.path) ?? loaded.get(file.path);
+        if (image) {
+          glyphs.push({ file, image });
+        }
+        continue;
+      }
+      const metricScale = Math.max(0.5, Math.min(2, metricStyle.scale));
+      const styledFile = {
+        ...file,
+        width: Math.max(1, Math.round(file.width * metricScale)),
+        height: Math.max(1, Math.round(file.height * metricScale))
+      };
+      const cacheKey = `${file.path}|${options.fontFamily}|${metricStyle.color}|${metricScale}`;
+      let image = styledMetricGlyphs.get(cacheKey);
+      if (!image) {
+        const dataUrl = options.fontFamily
+          ? renderDigitSprite(
+              digit,
+              styledFile.width,
+              styledFile.height,
+              options.fontFamily,
+              metricStyle.color
+            )
+          : await resizeAndTintSprite(
+              loadedAssets.get(file.path)?.dataUrl ?? "",
+              styledFile.width,
+              styledFile.height,
+              metricStyle.color
+            );
+        image = await loadStudioImage(dataUrl);
+        styledMetricGlyphs.set(cacheKey, image);
+      }
+      glyphs.push({ file: styledFile, image });
+    }
     if (glyphs.length === 0) {
       continue;
     }

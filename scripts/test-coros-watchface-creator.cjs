@@ -94,6 +94,59 @@ async function main() {
 
   const starter = await watchfaces.selectCorosWatchfaceArchive(sourcePath);
 
+  // --- Persistent editable projects --------------------------------------
+  const projectDesign = {
+    version: 1,
+    backgroundColor: "#081116",
+    accentColor: "#51e0b5",
+    artwork: null,
+    zoom: 1,
+    fontFamily: "",
+    digitColor: "#ffffff",
+    tintLabels: false,
+    tintIcons: false,
+    previewComplication: "heartRate",
+    metricChanges: {},
+    metricStyles: {},
+    timeStyles: {},
+    staticSeparators: {
+      colon: { enabled: false, x: 400, y: 300, size: 64, color: "#ffffff" },
+      dateSlash: { enabled: false, x: 400, y: 240, size: 48, color: "#ffffff" }
+    },
+    layoutOffsets: { hours: { dx: 10, dy: 20 } },
+    designSprites: []
+  };
+  const savedProject = await watchfaces.saveCorosWatchfaceProject({
+    name: "Saved creator fixture",
+    sourceArchiveId: starter.archiveId,
+    design: projectDesign
+  });
+  assert.equal(savedProject.name, "Saved creator fixture");
+  assert.equal(savedProject.archive.sourceTemplateId, 250601);
+  assert.deepEqual(savedProject.design.layoutOffsets.hours, { dx: 10, dy: 20 });
+  const updatedProject = await watchfaces.saveCorosWatchfaceProject({
+    projectId: savedProject.projectId,
+    name: "Updated creator fixture",
+    sourceArchiveId: starter.archiveId,
+    design: { ...projectDesign, backgroundColor: "#123456" }
+  });
+  assert.equal(updatedProject.projectId, savedProject.projectId);
+  assert.equal(updatedProject.name, "Updated creator fixture");
+  const projectList = await watchfaces.listCorosWatchfaceProjects();
+  assert.equal(projectList.some((project) => project.projectId === savedProject.projectId), true);
+  const loadedProject = await watchfaces.loadCorosWatchfaceProject(
+    savedProject.projectId
+  );
+  assert.equal(loadedProject.archive.sourceTemplateId, 250601);
+  assert.equal(loadedProject.design.backgroundColor, "#123456");
+  await watchfaces.deleteCorosWatchfaceProject(savedProject.projectId);
+  assert.equal(
+    (await watchfaces.listCorosWatchfaceProjects()).some(
+      (project) => project.projectId === savedProject.projectId
+    ),
+    false
+  );
+
   // --- Template introspection -------------------------------------------
   const details = await watchfaces.describeCorosWatchfaceTemplate(starter.archiveId);
   assert.equal(details.archiveId, starter.archiveId);
@@ -202,6 +255,35 @@ async function main() {
     "untouched sprites must remain identical"
   );
 
+  // --- Isolated generated metric sprite folders --------------------------
+  const generatedMetricDigit = solidPng(18, 30, 0x70);
+  const withGeneratedSprite = await watchfaces.createCorosWatchfaceArchive({
+    sourceArchiveId: starter.archiveId,
+    backgroundDataUrl: pngDataUrl(icon),
+    assetReplacements: [
+      {
+        path: "watchface_800x800/studio/time/00.png",
+        dataUrl: pngDataUrl(generatedMetricDigit),
+        create: true
+      }
+    ],
+    configOverrides: [
+      {
+        path: "watchface_800x800/config.txt",
+        values: { time_hour_high_font: "studio/time" }
+      }
+    ]
+  });
+  const generatedSpriteOutput = await findCreatorOutput(withGeneratedSprite);
+  assert.ok(generatedSpriteOutput, "generated-sprite output should be available");
+  const generatedSpriteZip = await unzipper.Open.file(generatedSpriteOutput.path);
+  const generatedSpriteEntry = generatedSpriteZip.files.find(
+    (entry) =>
+      entry.type === "File" && entry.path === "watchface_800x800/studio/time/00.png"
+  );
+  assert.ok(generatedSpriteEntry, "a generated studio sprite should be added to the archive");
+  assert.deepEqual(await generatedSpriteEntry.buffer(), generatedMetricDigit);
+
   // --- Replacement validation ---------------------------------------------
   await assert.rejects(
     watchfaces.createCorosWatchfaceArchive({
@@ -224,6 +306,21 @@ async function main() {
     }),
     /does not exist in the starter template/,
     "unknown template paths must be rejected"
+  );
+  await assert.rejects(
+    watchfaces.createCorosWatchfaceArchive({
+      sourceArchiveId: starter.archiveId,
+      backgroundDataUrl: pngDataUrl(icon),
+      assetReplacements: [
+        {
+          path: "watchface_800x800/../escape/00.png",
+          dataUrl: pngDataUrl(replacementDigit),
+          create: true
+        }
+      ]
+    }),
+    /must use a watchface resolution studio folder/,
+    "new sprite paths must stay inside a controlled studio folder"
   );
   await assert.rejects(
     watchfaces.createCorosWatchfaceArchive({
