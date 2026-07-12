@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import {
   applyConfigOverridesToDetails,
   buildAmPmOverrides,
+  buildControlTemperatureOverrides,
+  buildControlIconPositionOverrides,
   buildDateStyleOverrides,
   buildLayerVisibilityOverrides,
   buildLayerColorOverrides,
@@ -54,14 +56,15 @@ function resolution(width, digitWidth, digitHeight) {
       elevation_rect: "",
       elevation_font: "",
       temperature_rect: "",
+      temperature_font: "",
       temperature_font_color: "",
-      temperature_negative_sign_icon: "",
       control_temperature_icon_pos: "",
       control_temperature_icon: "",
       control_temperature_rect: "",
       control_temperature_font: "",
       control_temperature_font_color: "",
       control_temperature_negative_sign_icon: "",
+      control_negative_sign_icon: "",
       am_icon: "icon\\am.png",
       pm_icon: "icon\\pm.png",
       am_pm_icon_pos: `{${Math.round(width * 0.6)},${Math.round(width * 0.125)}}`,
@@ -88,6 +91,8 @@ function resolution(width, digitWidth, digitHeight) {
       english_date_day_font: "13x19",
       english_date_day_font_color: "",
       battery_level_font_color: "",
+      battery_icon_pos: `{${Math.round(width * 0.2)},${Math.round(width * 0.1)}}`,
+      battery_icon_dir: "battery",
       rect_control1_pos: `{${Math.round(width * 0.125)},${Math.round(width * 0.25)}}`,
       control_hr_rect: `{${Math.round(width * 0.2)},0,${Math.round(width * 0.36)},${digitHeight},hcenter|vcenter}`,
       control_hr_font: "13x19",
@@ -107,6 +112,12 @@ function resolution(width, digitWidth, digitHeight) {
         kind: "week",
         aod: false,
         files: weekFiles(digitWidth * 3, digitHeight, directory, "english_week")
+      },
+      {
+        folder: "battery",
+        kind: "state",
+        aod: false,
+        files: digitFiles(digitWidth * 2, digitHeight, directory, "battery")
       }
     ],
     icons: [
@@ -180,7 +191,84 @@ assert.deepEqual(
 );
 assert.deepEqual(
   getAvailableComplications(details).map(({ id }) => id),
-  ["heartRate", "steps"]
+  ["heartRate", "steps", "battery", "temperature"]
+);
+
+const iconPositionDetails = applyConfigOverridesToDetails(details, [
+  {
+    path: "watchface_416x416/config.txt",
+    values: {
+      control_step_icon_pos: "{12,8}",
+      control_battery_icon_pos: "{17,10}"
+    }
+  },
+  {
+    path: "watchface_800x800/config.txt",
+    values: {
+      control_step_icon_pos: "{24,16}",
+      control_battery_icon_pos: "{32,20}"
+    }
+  }
+]);
+const pairedControlDetails = applyConfigOverridesToDetails(details, [
+  {
+    path: "watchface_800x800/config.txt",
+    values: {
+      control_exercise_hour_rect: "{94,0,182,64,hcenter|vcenter}",
+      control_exercise_minute_rect: "{201,0,289,64,hcenter|vcenter}",
+      control_exercise_font: "13x19",
+      control_sunrise_hour_rect: "{94,0,182,64,hcenter|vcenter}",
+      control_sunrise_minute_rect: "{201,0,289,64,hcenter|vcenter}",
+      control_sunrise_font: "13x19",
+      control_sunset_hour_rect: "{94,0,182,64,hcenter|vcenter}",
+      control_sunset_minute_rect: "{201,0,289,64,hcenter|vcenter}",
+      control_sunset_font: "13x19"
+    }
+  }
+]);
+assert.deepEqual(
+  getAvailableComplications(pairedControlDetails).map(({ id }) => id),
+  [
+    "heartRate",
+    "steps",
+    "exercise",
+    "sunrise",
+    "sunset",
+    "battery",
+    "temperature"
+  ]
+);
+const controlIconOverrides = buildControlIconPositionOverrides(iconPositionDetails, {
+  steps: { dx: 10, dy: -6 },
+  battery: { dx: -4, dy: 8 },
+  temperature: { dx: 20, dy: 20 }
+});
+assert.deepEqual(
+  controlIconOverrides.find((entry) => entry.path.includes("800x800"))?.values,
+  {
+    control_step_icon_pos: "{34,10}",
+    control_battery_icon_pos: "{28,28}"
+  }
+);
+assert.deepEqual(
+  controlIconOverrides.find((entry) => entry.path.includes("416x416"))?.values,
+  {
+    control_step_icon_pos: "{17,5}",
+    control_battery_icon_pos: "{15,14}"
+  }
+);
+const archivedControlIconOverrides = buildControlIconPositionOverrides(
+  iconPositionDetails,
+  { steps: { dx: 10, dy: -6 } },
+  true
+);
+assert.deepEqual(
+  archivedControlIconOverrides.find((entry) => entry.path.includes("800x800"))?.values,
+  { control_step_icon_pos: "{34,22}" }
+);
+assert.deepEqual(
+  archivedControlIconOverrides.find((entry) => entry.path.includes("416x416"))?.values,
+  { control_step_icon_pos: "{17,11}" }
 );
 
 const metricOverrides = buildMetricOverrides(details, {
@@ -200,16 +288,36 @@ assert.equal(full.values.heartreate_level_font, "13x19");
 assert.equal(full.values.step_rect, "{474,576,694,640,hcenter|vcenter}");
 assert.equal(
   full.values.temperature_rect,
-  "{334,528,466,592,hcenter|vcenter}"
+  "{65,600,315,685,hcenter|vcenter}"
 );
-assert.equal(full.values.temperature_font, undefined);
-assert.equal(full.values.control_temperature_font, "13x19");
-assert.equal(
-  full.values.control_temperature_rect,
-  "{92,0,279,63,hcenter|vcenter}"
-);
+assert.equal(full.values.temperature_font, "13x19");
+assert.equal(full.values.temperature_font_color, "0xFFFFFF");
+assert.equal(full.values.control_temperature_font, undefined);
+assert.equal(full.values.control_temperature_rect, undefined);
 assert.equal(full.values.kcal_rect, "");
 assert.equal(full.values.kcal_font, "");
+const activeTemperatureDetails = applyConfigOverridesToDetails(details, [
+  {
+    path: "watchface_416x416/config.txt",
+    values: {
+      temperature_rect: "{46,320,158,358,hcenter|vcenter}",
+      temperature_font_color: "0xFFFFFF",
+      temperature_negative_sign_icon: "icon\\negative.png"
+    }
+  },
+  {
+    path: "watchface_800x800/config.txt",
+    values: {
+      temperature_rect: "{-58,442,38,475,hcenter|vcenter}",
+      temperature_font_color: "0xFFFFFF",
+      temperature_negative_sign_icon: "icon\\negative.png"
+    }
+  }
+]);
+const repairedTemperature = buildMetricOverrides(activeTemperatureDetails, {})
+  .find((entry) => entry.path.includes("800x800"));
+assert.equal(repairedTemperature?.values.temperature_font, "13x19");
+assert.equal(repairedTemperature?.values.temperature_rect, undefined);
 assert.deepEqual(
   mergeAssetReplacements(
     [{ path: "watchface_800x800/01/00.png", dataUrl: "global" }],
@@ -281,12 +389,12 @@ assert.equal(
 assert.equal(fullMetricStyle?.values.heartreate_level_font, "cl_hr");
 assert.equal(
   fullMetricStyle?.values.temperature_rect,
-  "{318,520,483,600,hcenter|vcenter}"
+  "{34,590,347,696,hcenter|vcenter}"
 );
 assert.equal(fullMetricStyle?.values.temperature_font_color, "0x33AA55");
-assert.equal(fullMetricStyle?.values.temperature_font, undefined);
-assert.equal(fullMetricStyle?.values.control_temperature_font, "cl_temp");
-assert.equal(fullMetricStyle?.values.control_temperature_font_color, "0x33AA55");
+assert.equal(fullMetricStyle?.values.temperature_font, "cl_ftemp");
+assert.equal(fullMetricStyle?.values.control_temperature_font, undefined);
+assert.equal(fullMetricStyle?.values.control_temperature_font_color, undefined);
 const metricStyleWithoutColor = buildMetricStyleOverrides(
   withMetrics,
   { temperature: { scale: 1 } },
@@ -297,7 +405,28 @@ assert.equal(
   metricStyleWithoutColor?.values.control_temperature_font_color,
   undefined
 );
-assert.equal(metricStyleWithoutColor?.values.control_temperature_font, "cl_temp");
+assert.equal(metricStyleWithoutColor?.values.control_temperature_font, undefined);
+const controlTemperatureOverrides = buildControlTemperatureOverrides(
+  withMetrics,
+  { color: "#33aa55", scale: 1 },
+  true
+);
+const fullControlTemperature = controlTemperatureOverrides.find((entry) =>
+  entry.path.includes("800x800")
+);
+assert.equal(
+  fullControlTemperature?.values.control_temperature_rect,
+  "{80,0,304,64,hcenter|vcenter}"
+);
+assert.equal(fullControlTemperature?.values.control_temperature_font, "cl_ctemp");
+assert.equal(
+  fullControlTemperature?.values.control_temperature_font_color,
+  "0x33AA55"
+);
+assert.equal(
+  fullControlTemperature?.values.control_temperature_negative_sign_icon,
+  undefined
+);
 const timeStyleOverrides = buildTimeStyleOverrides(
   withMetrics,
   { hours: { color: "#33ddff", scale: 1.5 } },
@@ -383,6 +512,14 @@ assert.deepEqual(
     y1: 264
   }
 );
+assert.deepEqual(fullBounds.find((entry) => entry.id === "battery"), {
+  id: "battery",
+  label: "Battery",
+  x0: 160,
+  y0: 80,
+  x1: 248,
+  y1: 144
+});
 const fullLimits = computeLayoutOffsetLimits(withMetrics.resolutions[1]);
 assert.deepEqual(fullLimits.heartRate, {
   minDx: -134,

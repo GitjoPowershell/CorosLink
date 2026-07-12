@@ -3582,9 +3582,9 @@ td span {
 
 .watchfaces-theme-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 12px;
-  max-height: 640px;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 16px;
+  max-height: 780px;
   overflow: auto;
   padding-right: 3px;
 }
@@ -3599,7 +3599,8 @@ td span {
 .watchfaces-theme-preview {
   display: grid;
   position: relative;
-  aspect-ratio: 1.45;
+  min-height: 250px;
+  aspect-ratio: 1;
   place-items: center;
   overflow: hidden;
   background:
@@ -3613,7 +3614,9 @@ td span {
   z-index: 1;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  box-sizing: border-box;
+  object-fit: contain;
+  padding: 12px;
 }
 
 .watchfaces-theme-copy {

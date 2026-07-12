@@ -60,13 +60,20 @@ import {
   computeLayoutOffsetLimits,
   drawStudioPreview,
   getAmPmCapability,
+  getAvailableComplications,
   inferStaticSeparators,
+  loadStudioImage,
+  parseConfigPos,
   pickPreviewResolution,
   type WatchfaceDatePartId,
   type WatchfaceMetricId,
   type WatchfaceStaticSeparatorId,
   type WatchfaceTimePartId
 } from "./watchfaceStudio";
+import {
+  getWeatherCapability,
+  weatherPreviewUrl
+} from "./weatherAssets";
 import { LocalFontPicker } from "./LocalFontPicker";
 
 interface WatchfaceEditorProps {
@@ -83,6 +90,27 @@ interface WatchfaceEditorProps {
 
 const PREVIEW_SIZE = 520;
 
+function normalizeEditorDesign(
+  design: CorosWatchfaceDesignState
+): CorosWatchfaceDesignState {
+  if (
+    design.metricChanges?.temperature !== true ||
+    design.metricStyles?.temperature
+  ) {
+    return design;
+  }
+  return {
+    ...design,
+    metricStyles: {
+      ...design.metricStyles,
+      temperature: {
+        color: design.digitColor,
+        scale: 1
+      }
+    }
+  };
+}
+
 export function WatchfaceEditor({
   api,
   starterArchive,
@@ -98,7 +126,7 @@ export function WatchfaceEditor({
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const assetCacheRef = useRef(new Map<string, CorosWatchfaceTemplateAsset>());
   const dragRef = useRef<{
-    kind: "layout" | "bgElement" | "sprite" | "staticSeparator" | "ampm";
+    kind: "layout" | "bgElement" | "sprite" | "staticSeparator" | "ampm" | "weather";
     targetId: string;
     startX: number;
     startY: number;
@@ -109,7 +137,7 @@ export function WatchfaceEditor({
 
   const [details, setDetails] = useState<CorosWatchfaceTemplateDetails | null>(null);
   const [design, setDesign] = useState<CorosWatchfaceDesignState>(
-    () => initialDesign ?? makeDefaultDesign()
+    () => normalizeEditorDesign(initialDesign ?? makeDefaultDesign())
   );
   const [selectedId, setSelectedId] = useState<string>("background");
   const [backgroundDataUrl, setBackgroundDataUrl] = useState("");
@@ -164,6 +192,19 @@ export function WatchfaceEditor({
                   ...capability.defaultPos,
                   scale: 1,
                   color: current.digitColor
+                }
+              }));
+            }
+          }
+          if (!initialDesign?.weatherIndicator) {
+            const capability = getWeatherCapability(described);
+            if (capability) {
+              setDesign((current) => ({
+                ...current,
+                weatherIndicator: {
+                  enabled: capability.active,
+                  ...capability.defaultPos,
+                  scale: 1
                 }
               }));
             }
@@ -265,13 +306,33 @@ export function WatchfaceEditor({
     canvas.width = PREVIEW_SIZE;
     canvas.height = PREVIEW_SIZE;
     const timer = window.setTimeout(() => {
-      void drawStudioPreview(
-        canvas,
-        backgroundDataUrl,
-        previewDetails,
-        toStudioOptions(design),
-        loadAssets
-      ).catch(() => undefined);
+      void (async () => {
+        await drawStudioPreview(
+          canvas,
+          backgroundDataUrl,
+          previewDetails,
+          toStudioOptions(design),
+          loadAssets
+        );
+        const weather = design.weatherIndicator;
+        if (!weather?.enabled) {
+          return;
+        }
+        const url = weatherPreviewUrl(previewWidth);
+        if (!url) {
+          return;
+        }
+        const image = await loadStudioImage(url);
+        const context = canvas.getContext("2d");
+        const scale = canvas.width / previewWidth;
+        context?.drawImage(
+          image,
+          weather.x * scale,
+          weather.y * scale,
+          image.naturalWidth * weather.scale * scale,
+          image.naturalHeight * weather.scale * scale
+        );
+      })().catch(() => undefined);
     }, 90);
     return () => window.clearTimeout(timer);
   }, [previewDetails, backgroundDataUrl, design, loadAssets]);
@@ -377,6 +438,18 @@ export function WatchfaceEditor({
       return;
     }
     setSelectedId(liveHit.id);
+    if (liveHit.weatherIndicator && design.weatherIndicator) {
+      dragRef.current = {
+        kind: "weather",
+        targetId: "weather",
+        startX: point.x,
+        startY: point.y,
+        baseX: design.weatherIndicator.x,
+        baseY: design.weatherIndicator.y
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
     if (liveHit.ampmIndicator && design.ampmIndicator) {
       dragRef.current = {
         kind: "ampm",
@@ -501,6 +574,26 @@ export function WatchfaceEditor({
       });
       return;
     }
+    if (drag.kind === "weather") {
+      const capability = details ? getWeatherCapability(details) : null;
+      const style = design.weatherIndicator;
+      if (!capability || !style) {
+        return;
+      }
+      const faceWidth = previewResolution?.width ?? previewWidth;
+      const faceHeight = previewResolution?.height ?? previewWidth;
+      const width = capability.size.width * style.scale;
+      const height = capability.size.height * style.scale;
+      updateWeatherIndicator({
+        x: Math.round(
+          Math.max(0, Math.min(faceWidth - width, drag.baseX + point.x - drag.startX))
+        ),
+        y: Math.round(
+          Math.max(0, Math.min(faceHeight - height, drag.baseY + point.y - drag.startY))
+        )
+      });
+      return;
+    }
     const limits = layoutLimits[drag.targetId];
     const fallbackLimit = Math.max(
       previewResolution?.width ?? 800,
@@ -536,10 +629,20 @@ export function WatchfaceEditor({
   }
 
   function setMetricVisible(metricId: WatchfaceMetricId, visible: boolean) {
-    setDesign((prev) => ({
-      ...prev,
-      metricChanges: { ...prev.metricChanges, [metricId]: visible }
-    }));
+    setDesign((prev) => {
+      const metricStyles = { ...prev.metricStyles };
+      if (metricId === "temperature" && visible && !metricStyles.temperature) {
+        metricStyles.temperature = {
+          color: prev.digitColor,
+          scale: 1
+        };
+      }
+      return {
+        ...prev,
+        metricChanges: { ...prev.metricChanges, [metricId]: visible },
+        metricStyles
+      };
+    });
   }
 
   function setFirmwareLayerVisible(layerId: string, visible: boolean) {
@@ -599,6 +702,21 @@ export function WatchfaceEditor({
         y: prev.ampmIndicator?.y ?? 0,
         scale: prev.ampmIndicator?.scale ?? 1,
         color: prev.ampmIndicator?.color ?? prev.digitColor,
+        ...patch
+      }
+    }));
+  }
+
+  function updateWeatherIndicator(
+    patch: Partial<NonNullable<CorosWatchfaceDesignState["weatherIndicator"]>>
+  ) {
+    setDesign((prev) => ({
+      ...prev,
+      weatherIndicator: {
+        enabled: prev.weatherIndicator?.enabled ?? false,
+        x: prev.weatherIndicator?.x ?? 0,
+        y: prev.weatherIndicator?.y ?? 0,
+        scale: prev.weatherIndicator?.scale ?? 1,
         ...patch
       }
     }));
@@ -867,6 +985,8 @@ export function WatchfaceEditor({
                       onClick={() => {
                         if (layer.metricId) {
                           setMetricVisible(layer.metricId, !layer.visible);
+                        } else if (layer.weatherIndicator) {
+                          updateWeatherIndicator({ enabled: !layer.visible });
                         } else if (layer.ampmIndicator) {
                           updateAmPmIndicator({ enabled: !layer.visible });
                         } else if (layer.staticSeparatorId) {
@@ -957,6 +1077,10 @@ export function WatchfaceEditor({
   );
 
   function renderInspector(layer: EditorLayer) {
+    if (layer.weatherIndicator) {
+      return renderWeatherInspector();
+    }
+
     if (layer.ampmIndicator) {
       return renderAmPmInspector();
     }
@@ -1230,6 +1354,7 @@ export function WatchfaceEditor({
     return (
       <div className="watchface-inspector-group">
         {renderLayerVisibilityToggle(layer)}
+        {layer.layoutGroupId === "complication" ? renderComplicationPicker() : null}
         {layer.capabilities.color && layer.layoutGroupId ? (
           <label className="field">
             Color
@@ -1271,9 +1396,171 @@ export function WatchfaceEditor({
     );
   }
 
+  function renderComplicationPicker() {
+    const available = getAvailableComplications(previewDetails ?? details!);
+    if (available.length === 0) {
+      return null;
+    }
+    const selected = available.some(
+      (complication) => complication.id === design.previewComplication
+    )
+      ? design.previewComplication
+      : available[0]!.id;
+    const selectedComplication = available.find(
+      (complication) => complication.id === selected
+    );
+    const sourceResolution = details ? pickPreviewResolution(details) : null;
+    const iconPositionKey = selectedComplication
+      ? `control_${selectedComplication.controlPrefix}_icon_pos`
+      : "";
+    const baseIconPosition = iconPositionKey
+      ? parseConfigPos(sourceResolution?.config[iconPositionKey])
+      : null;
+    const iconOffset = design.controlIconOffsets?.[selected] ?? { dx: 0, dy: 0 };
+    const setIconOffset = (dx: number, dy: number) => {
+      setDesign((current) => ({
+        ...current,
+        controlIconOffsets: {
+          ...(current.controlIconOffsets ?? {}),
+          [selected]: { dx: Math.round(dx), dy: Math.round(dy) }
+        }
+      }));
+    };
+    return (
+      <>
+        <label className="field">
+          Preview data
+          <select
+            value={selected}
+            onChange={(event) => {
+              const previewComplication = event.target.value;
+              setDesign((current) => ({
+                ...current,
+                previewComplication,
+                metricStyles: previewComplication === "temperature"
+                  ? {
+                      ...current.metricStyles,
+                      temperature: current.metricStyles?.temperature ?? {
+                        color: current.digitColor,
+                        scale: 1
+                      }
+                    }
+                  : current.metricStyles
+              }));
+            }}
+          >
+            {available.map((complication) => (
+              <option key={complication.id} value={complication.id}>
+                {complication.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {selected === "temperature" ? (
+          <>
+            <LocalFontPicker
+              api={api}
+              label="Temperature font"
+              value={design.metricStyles?.temperature?.fontFamily ?? design.fontFamily}
+              emptyLabel="Keep control digits"
+              onChange={(fontFamily) => setMetricStyle("temperature", { fontFamily })}
+              typography={{
+                fontWeight: design.fontWeight ?? 400,
+                fontStyle: design.fontStyle ?? "normal",
+                letterSpacing: design.letterSpacing ?? 0
+              }}
+              onTypographyChange={(typography) => patchDesign(typography)}
+            />
+            <label className="field">
+              Temperature color
+              <span className="watchface-color-control">
+                <input
+                  type="color"
+                  value={design.metricStyles?.temperature?.color ?? design.digitColor}
+                  onChange={(event) => setMetricStyle("temperature", { color: event.target.value })}
+                />
+                <code>{design.metricStyles?.temperature?.color ?? design.digitColor}</code>
+                <button
+                  type="button"
+                  className="watchface-color-none"
+                  disabled={!design.metricStyles?.temperature?.color}
+                  onClick={() => clearMetricColor("temperature")}
+                >
+                  None
+                </button>
+              </span>
+            </label>
+            <label className="field watchface-zoom-control">
+              Temperature size <span>{(design.metricStyles?.temperature?.scale ?? 1).toFixed(2)}×</span>
+              <input
+                type="range"
+                min="0.5"
+                max="2"
+                step="0.02"
+                value={design.metricStyles?.temperature?.scale ?? 1}
+                onChange={(event) => setMetricStyle("temperature", { scale: Number(event.target.value) })}
+              />
+            </label>
+          </>
+        ) : null}
+        {baseIconPosition ? (
+          <div className="watchface-inspector-position">
+            <span>Selector icon position</span>
+            <div className="watchface-position-inputs">
+              <label>
+                X
+                <input
+                  type="number"
+                  value={baseIconPosition.x + iconOffset.dx}
+                  onChange={(event) =>
+                    setIconOffset(
+                      (Number(event.target.value) || 0) - baseIconPosition.x,
+                      iconOffset.dy
+                    )
+                  }
+                />
+              </label>
+              <label>
+                Y
+                <input
+                  type="number"
+                  value={baseIconPosition.y + iconOffset.dy}
+                  onChange={(event) =>
+                    setIconOffset(
+                      iconOffset.dx,
+                      (Number(event.target.value) || 0) - baseIconPosition.y
+                    )
+                  }
+                />
+              </label>
+            </div>
+            <span>Fine tune · 1 px</span>
+            <div className="watchface-nudge-pad">
+              <button type="button" onClick={() => setIconOffset(iconOffset.dx, iconOffset.dy - 1)} aria-label="Nudge selector icon up">↑</button>
+              <button type="button" onClick={() => setIconOffset(iconOffset.dx - 1, iconOffset.dy)} aria-label="Nudge selector icon left">←</button>
+              <button type="button" onClick={() => setIconOffset(iconOffset.dx + 1, iconOffset.dy)} aria-label="Nudge selector icon right">→</button>
+              <button type="button" onClick={() => setIconOffset(iconOffset.dx, iconOffset.dy + 1)} aria-label="Nudge selector icon down">↓</button>
+              <button type="button" className="watchface-nudge-reset" onClick={() => setIconOffset(0, 0)}>Reset</button>
+            </div>
+            <p className="watchface-studio-summary">
+              This moves only the {selectedComplication?.label.toLowerCase()} icon.
+              Move the Selectable metric layer to reposition its icon and value together.
+            </p>
+          </div>
+        ) : null}
+        <p className="watchface-studio-summary">
+          Temperature exports only through control_temperature_* and
+          control_negative_sign_icon. Move this Selectable metric layer to
+          position the control slot on the face.
+        </p>
+      </>
+    );
+  }
+
   function renderLayerVisibilityToggle(layer: EditorLayer) {
     if (
       !layer.canHide ||
+      layer.weatherIndicator ||
       layer.ampmIndicator ||
       layer.staticSeparatorId ||
       layer.metricId
@@ -1583,6 +1870,13 @@ export function WatchfaceEditor({
           />
           Show AM/PM indicator
         </label>
+        <LocalFontPicker
+          api={api}
+          label="Font"
+          value={indicator.fontFamily ?? ""}
+          emptyLabel="Keep template lettering"
+          onChange={(fontFamily) => updateAmPmIndicator({ fontFamily })}
+        />
         <label className="field">
           Color
           <span className="watchface-color-control">
@@ -1666,6 +1960,145 @@ export function WatchfaceEditor({
         </div>
         <p className="watchface-studio-summary">
           The watch automatically swaps this sprite between AM and PM in 12-hour mode.
+        </p>
+      </div>
+    );
+  }
+
+  function renderWeatherInspector() {
+    const capability = details ? getWeatherCapability(details) : null;
+    const indicator = design.weatherIndicator;
+    if (!capability || !indicator) {
+      return null;
+    }
+    const faceWidth = previewResolution?.width ?? previewWidth;
+    const faceHeight = previewResolution?.height ?? previewWidth;
+    const offset = {
+      dx: Math.round(indicator.x - capability.defaultPos.x),
+      dy: Math.round(indicator.y - capability.defaultPos.y)
+    };
+    const boundsForScale = (scale: number) => ({
+      width: capability.size.width * scale,
+      height: capability.size.height * scale
+    });
+    const setPosition = (x: number, y: number, scale = indicator.scale) => {
+      const { width, height } = boundsForScale(scale);
+      updateWeatherIndicator({
+        x: Math.round(Math.max(0, Math.min(faceWidth - width, x))),
+        y: Math.round(Math.max(0, Math.min(faceHeight - height, y)))
+      });
+    };
+    const alignX = (position: "start" | "center" | "end") => {
+      const { width } = boundsForScale(indicator.scale);
+      setPosition(
+        position === "start"
+          ? 0
+          : position === "end"
+            ? faceWidth - width
+            : (faceWidth - width) / 2,
+        indicator.y
+      );
+    };
+    const alignY = (position: "start" | "center" | "end") => {
+      const { height } = boundsForScale(indicator.scale);
+      setPosition(
+        indicator.x,
+        position === "start"
+          ? 0
+          : position === "end"
+            ? faceHeight - height
+            : (faceHeight - height) / 2
+      );
+    };
+    return (
+      <div className="watchface-inspector-group">
+        <label className="watchface-studio-toggle">
+          <input
+            type="checkbox"
+            checked={indicator.enabled}
+            onChange={(event) =>
+              updateWeatherIndicator({ enabled: event.target.checked })
+            }
+          />
+          Show weather icon
+        </label>
+        <label className="field watchface-zoom-control">
+          Size <span>{indicator.scale.toFixed(2)}×</span>
+          <input
+            type="range"
+            min="0.5"
+            max="2"
+            step="0.02"
+            value={indicator.scale}
+            onChange={(event) => {
+              const scale = Number(event.target.value);
+              updateWeatherIndicator({ scale });
+              setPosition(indicator.x, indicator.y, scale);
+            }}
+          />
+        </label>
+        <div className="watchface-inspector-position">
+          <span>Exact offset</span>
+          <div className="watchface-position-inputs">
+            <label>
+              X
+              <input
+                type="number"
+                min={-capability.defaultPos.x}
+                max={Math.max(0, faceWidth - boundsForScale(indicator.scale).width) - capability.defaultPos.x}
+                value={offset.dx}
+                onChange={(event) =>
+                  setPosition(
+                    capability.defaultPos.x + (Number(event.target.value) || 0),
+                    indicator.y
+                  )
+                }
+              />
+            </label>
+            <label>
+              Y
+              <input
+                type="number"
+                min={-capability.defaultPos.y}
+                max={Math.max(0, faceHeight - boundsForScale(indicator.scale).height) - capability.defaultPos.y}
+                value={offset.dy}
+                onChange={(event) =>
+                  setPosition(
+                    indicator.x,
+                    capability.defaultPos.y + (Number(event.target.value) || 0)
+                  )
+                }
+              />
+            </label>
+          </div>
+          <span>Align to face</span>
+          <div className="watchface-align-grid">
+            <button type="button" onClick={() => alignX("start")}>Left</button>
+            <button type="button" onClick={() => alignX("center")}>Center</button>
+            <button type="button" onClick={() => alignX("end")}>Right</button>
+            <button type="button" onClick={() => alignY("start")}>Top</button>
+            <button type="button" onClick={() => alignY("center")}>Middle</button>
+            <button type="button" onClick={() => alignY("end")}>Bottom</button>
+          </div>
+          <span>Fine tune · 1 px</span>
+          <div className="watchface-nudge-pad">
+            <button type="button" onClick={() => setPosition(indicator.x, indicator.y - 1)} aria-label="Nudge up">↑</button>
+            <button type="button" onClick={() => setPosition(indicator.x - 1, indicator.y)} aria-label="Nudge left">←</button>
+            <button type="button" onClick={() => setPosition(indicator.x + 1, indicator.y)} aria-label="Nudge right">→</button>
+            <button type="button" onClick={() => setPosition(indicator.x, indicator.y + 1)} aria-label="Nudge down">↓</button>
+            {(offset.dx !== 0 || offset.dy !== 0) ? (
+              <button
+                type="button"
+                className="watchface-nudge-reset"
+                onClick={() => setPosition(capability.defaultPos.x, capability.defaultPos.y)}
+              >
+                Reset
+              </button>
+            ) : null}
+          </div>
+        </div>
+        <p className="watchface-studio-summary">
+          The editor previews the sunny state. The watch automatically swaps among all 41 weather states.
         </p>
       </div>
     );

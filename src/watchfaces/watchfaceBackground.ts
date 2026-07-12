@@ -41,6 +41,7 @@ export function makeDefaultDesign(): CorosWatchfaceDesignState {
     previewComplication: "heartRate",
     metricChanges: {},
     metricStyles: {},
+    controlIconOffsets: {},
     timeStyles: {},
     dateStyles: {},
     staticSeparators: {
@@ -48,6 +49,7 @@ export function makeDefaultDesign(): CorosWatchfaceDesignState {
       dateSlash: { ...DEFAULT_STATIC_SEPARATORS.dateSlash }
     },
     ampmIndicator: { ...DEFAULT_AMPM_STYLE },
+    weatherIndicator: undefined,
     layoutOffsets: {},
     layerVisibility: {},
     layerColors: {},

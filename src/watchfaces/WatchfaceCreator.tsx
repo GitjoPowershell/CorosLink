@@ -38,6 +38,8 @@ import {
   applyLayoutToDetails,
   buildAmPmOverrides,
   buildAmPmSpriteReplacements,
+  buildControlTemperatureOverrides,
+  buildControlTemperatureSpriteReplacements,
   buildLayoutOverrides,
   buildMetricOverrides,
   buildMetricSpriteReplacements,
@@ -184,6 +186,7 @@ export function WatchfaceCreator({
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   const [draggingGroup, setDraggingGroup] = useState<string | null>(null);
 
+  const previewMetricStyles: WatchfaceMetricStyles = metricStyles;
   const studioOptions: WatchfaceStudioOptions = {
     fontFamily,
     fontWeight,
@@ -194,7 +197,7 @@ export function WatchfaceCreator({
     tintLabels,
     tintIcons,
     previewComplication,
-    metricStyles,
+    metricStyles: previewMetricStyles,
     timeStyles
   };
   const studioActive = Boolean(fontFamily) || tintLabels || tintIcons;
@@ -236,6 +239,21 @@ export function WatchfaceCreator({
         : [],
     [metricDetails, metricStyles]
   );
+  const controlTemperatureStyle = metricStyles.temperature ?? {
+    color: digitColor,
+    scale: 1
+  };
+  const controlTemperatureRasterActive = Boolean(
+    controlTemperatureStyle.fontFamily ||
+    fontFamily ||
+    controlTemperatureStyle.scale !== 1
+  );
+  const controlTemperatureOverrides = useMemo(
+    () => metricDetails && availableComplications.some((item) => item.id === "temperature")
+      ? buildControlTemperatureOverrides(metricDetails, controlTemperatureStyle)
+      : [],
+    [metricDetails, availableComplications, controlTemperatureStyle]
+  );
   const timeStyleOverrides = useMemo(
     () =>
       metricDetails
@@ -260,10 +278,11 @@ export function WatchfaceCreator({
     () =>
       mergeConfigOverrides(
         metricStyleOverrides,
+        controlTemperatureOverrides,
         timeStyleOverrides,
         staticSeparatorOverrides
       ),
-    [metricStyleOverrides, timeStyleOverrides, staticSeparatorOverrides]
+    [metricStyleOverrides, controlTemperatureOverrides, timeStyleOverrides, staticSeparatorOverrides]
   );
   const styledMetricDetails = useMemo(
     () =>
@@ -862,7 +881,7 @@ export function WatchfaceCreator({
           tintLabels,
           tintIcons,
           previewComplication,
-          metricStyles,
+          metricStyles: previewMetricStyles,
           timeStyles,
           ...(ampmCapability ? { ampmStyle } : {})
         },
@@ -1033,6 +1052,18 @@ export function WatchfaceCreator({
               studioOptions
             )
           : [];
+      const controlTemperatureSpriteReplacements =
+        details &&
+        availableComplications.some((item) => item.id === "temperature") &&
+        controlTemperatureRasterActive
+          ? await buildControlTemperatureSpriteReplacements(
+              details,
+              controlTemperatureStyle,
+              fontFamily,
+              loadAssets,
+              studioOptions
+            )
+          : [];
       const timeSpriteReplacements =
         details && timeStyleActive
           ? await buildTimeSpriteReplacements(
@@ -1050,6 +1081,7 @@ export function WatchfaceCreator({
       const allAssetReplacements = mergeAssetReplacements(
         assetReplacements,
         metricSpriteReplacements,
+        controlTemperatureSpriteReplacements,
         timeSpriteReplacements,
         ampmSpriteReplacements
       );
@@ -1085,6 +1117,13 @@ export function WatchfaceCreator({
       const configOverrides = mergeConfigOverrides(
         metricOverrides,
         exportMetricStyleOverrides,
+        details && availableComplications.some((item) => item.id === "temperature")
+          ? buildControlTemperatureOverrides(
+              details,
+              controlTemperatureStyle,
+              controlTemperatureRasterActive
+            )
+          : [],
         exportTimeStyleOverrides,
         timeTrackingOverrides,
         staticSeparatorOverrides,
@@ -1743,6 +1782,16 @@ export function WatchfaceCreator({
                                   ...current,
                                   [metric.id]: enabled
                                 }));
+                                if (
+                                  metric.id === "temperature" &&
+                                  enabled &&
+                                  !metricStyles.temperature
+                                ) {
+                                  setMetricStyles((current) => ({
+                                    ...current,
+                                    temperature: { color: digitColor, scale: 1 }
+                                  }));
+                                }
                                 if (!enabled) {
                                   setLayoutOffsets((current) => {
                                     const next = { ...current };
@@ -1814,16 +1863,24 @@ export function WatchfaceCreator({
                   <select
                     value={previewComplication}
                     disabled={disabled || creating}
-                    onChange={(event) =>
-                      setPreviewComplication(event.target.value as WatchfaceComplicationId)
-                    }
+                    onChange={(event) => {
+                      const next = event.target.value as WatchfaceComplicationId;
+                      setPreviewComplication(next);
+                      if (next === "temperature" && !metricStyles.temperature) {
+                        setMetricStyles((current) => ({
+                          ...current,
+                          temperature: { color: digitColor, scale: 1 }
+                        }));
+                      }
+                    }}
                   >
                     {availableComplications.map((metric) => (
                       <option key={metric.id} value={metric.id}>{metric.label}</option>
                     ))}
                   </select>
                   <small>
-                    Preview only. The complication stays selectable on the watch.
+                    Temperature writes the control_temperature_* definition. The
+                    selected control value still remains selectable on the watch.
                   </small>
                 </label>
               ) : null}

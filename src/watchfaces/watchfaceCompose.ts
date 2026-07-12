@@ -9,6 +9,9 @@ import {
   applyLayoutToDetails,
   buildAmPmOverrides,
   buildAmPmSpriteReplacements,
+  buildControlTemperatureOverrides,
+  buildControlTemperatureSpriteReplacements,
+  buildControlIconPositionOverrides,
   buildDateSpriteReplacements,
   buildDateStyleOverrides,
   buildLayerVisibilityOverrides,
@@ -24,6 +27,7 @@ import {
   buildTimeTrackingOverrides,
   buildTimeStyleOverrides,
   getAmPmCapability,
+  getAvailableComplications,
   mergeAssetReplacements,
   mergeConfigOverrides,
   type WatchfaceAssetLoader,
@@ -32,6 +36,10 @@ import {
   type WatchfaceStudioOptions,
   type WatchfaceTimeStyles
 } from "./watchfaceStudio";
+import {
+  buildWeatherOverrides,
+  buildWeatherSpriteReplacements
+} from "./weatherAssets";
 
 /**
  * The template details at each stage of the design pipeline. The editor's
@@ -94,11 +102,19 @@ export function deriveDesignDetails(
 ): DesignDetails {
   const metricOverrides = buildMetricOverrides(details, design.metricChanges ?? {});
   const metricDetails = applyConfigOverridesToDetails(details, metricOverrides);
+  const controlTemperatureStyle = metricStylesOf(design).temperature ?? {
+    color: design.digitColor,
+    scale: 1
+  };
   const componentStyleOverrides = mergeConfigOverrides(
     buildMetricStyleOverrides(metricDetails, metricStylesOf(design)),
+    getAvailableComplications(metricDetails).some((item) => item.id === "temperature")
+      ? buildControlTemperatureOverrides(metricDetails, controlTemperatureStyle)
+      : [],
     buildTimeStyleOverrides(metricDetails, timeStylesOf(design)),
     buildDateStyleOverrides(metricDetails, dateStylesOf(design)),
     buildLayerColorOverrides(metricDetails, design.layerColors ?? {}),
+    buildControlIconPositionOverrides(metricDetails, design.controlIconOffsets ?? {}),
     buildStaticSeparatorOverrides(details, design.staticSeparators)
   );
   const styledMetricDetails = applyConfigOverridesToDetails(
@@ -154,6 +170,18 @@ export async function composeWatchfaceReplacements(
   const ampmStyle = design.ampmIndicator;
   const ampmSupported = Boolean(getAmPmCapability(details) && ampmStyle);
   const ampmActive = Boolean(ampmSupported && ampmStyle?.enabled);
+  const weatherStyle = design.weatherIndicator;
+  const controlTemperatureActive = getAvailableComplications(details)
+    .some((item) => item.id === "temperature");
+  const controlTemperatureStyle = metricStyles.temperature ?? {
+    color: design.digitColor,
+    scale: 1
+  };
+  const controlTemperatureRasterActive = Boolean(
+    controlTemperatureStyle.fontFamily ||
+    design.fontFamily ||
+    controlTemperatureStyle.scale !== 1
+  );
 
   const assetReplacements = mergeAssetReplacements(
     studioActive
@@ -163,6 +191,15 @@ export async function composeWatchfaceReplacements(
       ? await buildMetricSpriteReplacements(
           metricDetails,
           metricStyles,
+          design.fontFamily,
+          loadAssets,
+          toStudioOptions(design)
+        )
+      : [],
+    controlTemperatureActive && controlTemperatureRasterActive
+      ? await buildControlTemperatureSpriteReplacements(
+          metricDetails,
+          controlTemperatureStyle,
           design.fontFamily,
           loadAssets,
           toStudioOptions(design)
@@ -192,7 +229,10 @@ export async function composeWatchfaceReplacements(
           loadAssets
         )
       : [],
-    ampmActive ? await buildAmPmSpriteReplacements(details, ampmStyle!, loadAssets) : []
+    ampmActive ? await buildAmPmSpriteReplacements(details, ampmStyle!, loadAssets) : [],
+    weatherStyle?.enabled
+      ? await buildWeatherSpriteReplacements(details, weatherStyle)
+      : []
   );
 
   const timeStyleOverrides = timeStyleActive
@@ -217,12 +257,25 @@ export async function composeWatchfaceReplacements(
   const configOverrides = mergeConfigOverrides(
     metricOverrides,
     metricStyleActive ? buildMetricStyleOverrides(metricDetails, metricStyles, true) : [],
+    controlTemperatureActive
+      ? buildControlTemperatureOverrides(
+          metricDetails,
+          controlTemperatureStyle,
+          controlTemperatureRasterActive
+        )
+      : [],
     timeStyleOverrides,
     dateStyleActive ? buildDateStyleOverrides(details, dateStyles, true) : [],
     timeTrackingOverrides,
     buildLayerColorOverrides(details, design.layerColors ?? {}),
+    buildControlIconPositionOverrides(
+      details,
+      design.controlIconOffsets ?? {},
+      true
+    ),
     buildStaticSeparatorOverrides(details, design.staticSeparators),
     ampmSupported ? buildAmPmOverrides(details, ampmStyle!) : [],
+    weatherStyle ? buildWeatherOverrides(details, weatherStyle) : [],
     layoutIsActive(design)
       ? buildLayoutOverrides(layoutDetails, design.layoutOffsets ?? {})
       : [],

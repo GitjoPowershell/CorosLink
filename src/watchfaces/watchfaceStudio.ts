@@ -201,6 +201,8 @@ export interface WatchfaceAmPmStyle {
   y: number;
   scale: number;
   color: string;
+  /** Optional desktop font rasterized into the live AM and PM sprites. */
+  fontFamily?: string;
 }
 
 const AMPM_CONFIG_KEYS = ["am_icon", "pm_icon", "am_pm_icon_pos"] as const;
@@ -326,29 +328,53 @@ export async function buildAmPmSpriteReplacements(
     return [];
   }
   const normalizedScale = Math.max(0.5, Math.min(2, style.scale));
-  const jobs: { source: CorosWatchfaceSpriteFile; path: string }[] = [];
+  const jobs: {
+    source: CorosWatchfaceSpriteFile;
+    path: string;
+    label: "AM" | "PM";
+  }[] = [];
   for (const resolution of details.resolutions) {
     if (!resolutionSupportsAmPm(resolution)) {
       continue;
     }
     const icons = findAmPmIcons(resolution)!;
     jobs.push(
-      { source: icons.am, path: `${resolution.directory}/${AMPM_SPRITE_FILES.am}` },
-      { source: icons.pm, path: `${resolution.directory}/${AMPM_SPRITE_FILES.pm}` }
+      {
+        source: icons.am,
+        path: `${resolution.directory}/${AMPM_SPRITE_FILES.am}`,
+        label: "AM"
+      },
+      {
+        source: icons.pm,
+        path: `${resolution.directory}/${AMPM_SPRITE_FILES.pm}`,
+        label: "PM"
+      }
     );
   }
-  const assets = await loadAssets([...new Set(jobs.map((job) => job.source.path))]);
+  const assets = style.fontFamily
+    ? []
+    : await loadAssets([...new Set(jobs.map((job) => job.source.path))]);
   const assetsByPath = new Map(assets.map((asset) => [asset.path, asset]));
   const replacements: CorosWatchfaceAssetReplacement[] = [];
   for (const job of jobs) {
+    const width = Math.max(1, Math.round(job.source.width * normalizedScale));
+    const height = Math.max(1, Math.round(job.source.height * normalizedScale));
     replacements.push({
       path: job.path,
-      dataUrl: await resizeAndTintSprite(
-        assetsByPath.get(job.source.path)?.dataUrl ?? "",
-        Math.max(1, Math.round(job.source.width * normalizedScale)),
-        Math.max(1, Math.round(job.source.height * normalizedScale)),
-        style.color
-      ),
+      dataUrl: style.fontFamily
+        ? renderDigitSprite(
+            job.label,
+            width,
+            height,
+            style.fontFamily,
+            style.color
+          )
+        : await resizeAndTintSprite(
+            assetsByPath.get(job.source.path)?.dataUrl ?? "",
+            width,
+            height,
+            style.color
+          ),
       create: true
     });
   }
@@ -685,16 +711,18 @@ export type WatchfaceComplicationId =
   | "calories"
   | "floors"
   | "elevation"
+  | "exercise"
+  | "sunrise"
+  | "sunset"
+  | "battery"
   | "temperature";
 
 interface WatchfaceFixedMetricDefinition {
   id: WatchfaceMetricId;
   label: string;
   rectKey: string;
-  /** Fixed temperature is firmware-rendered and has no temperature_font key. */
   fontKey?: string;
   fontColorKey?: string;
-  negativeSignKey?: string;
   controlPrefix: string;
   sampleValue: string;
   maxDigits: number;
@@ -706,6 +734,11 @@ interface WatchfaceComplicationDefinition {
   label: string;
   controlPrefix: string;
   sampleValue: string;
+  /** Controls such as sunrise use separate hour and minute rectangles. */
+  valueParts?: ReadonlyArray<{
+    rectSuffix: "hour" | "minute";
+    sampleValue: string;
+  }>;
 }
 
 export const WATCHFACE_FIXED_METRICS: WatchfaceFixedMetricDefinition[] = [
@@ -754,8 +787,8 @@ export const WATCHFACE_FIXED_METRICS: WatchfaceFixedMetricDefinition[] = [
     id: "temperature",
     label: "Temperature",
     rectKey: "temperature_rect",
+    fontKey: "temperature_font",
     fontColorKey: "temperature_font_color",
-    negativeSignKey: "temperature_negative_sign_icon",
     controlPrefix: "temperature",
     sampleValue: "18",
     maxDigits: 3,
@@ -768,7 +801,7 @@ const METRIC_STUDIO_FOLDERS: Record<WatchfaceMetricId, string> = {
   steps: "cl_steps",
   calories: "cl_kcal",
   elevation: "cl_elev",
-  temperature: "cl_temp"
+  temperature: "cl_ftemp"
 };
 
 function timeStudioFolder(
@@ -784,6 +817,37 @@ export const WATCHFACE_COMPLICATIONS: WatchfaceComplicationDefinition[] = [
   { id: "calories", label: "Calories", controlPrefix: "kcal", sampleValue: "534" },
   { id: "floors", label: "Floors", controlPrefix: "floor", sampleValue: "12" },
   { id: "elevation", label: "Elevation", controlPrefix: "elevation", sampleValue: "1284" },
+  {
+    id: "exercise",
+    label: "Exercise",
+    controlPrefix: "exercise",
+    sampleValue: "1:24",
+    valueParts: [
+      { rectSuffix: "hour", sampleValue: "1" },
+      { rectSuffix: "minute", sampleValue: "24" }
+    ]
+  },
+  {
+    id: "sunrise",
+    label: "Sunrise",
+    controlPrefix: "sunrise",
+    sampleValue: "6:30",
+    valueParts: [
+      { rectSuffix: "hour", sampleValue: "6" },
+      { rectSuffix: "minute", sampleValue: "30" }
+    ]
+  },
+  {
+    id: "sunset",
+    label: "Sunset",
+    controlPrefix: "sunset",
+    sampleValue: "19:45",
+    valueParts: [
+      { rectSuffix: "hour", sampleValue: "19" },
+      { rectSuffix: "minute", sampleValue: "45" }
+    ]
+  },
+  { id: "battery", label: "Battery", controlPrefix: "battery", sampleValue: "82" },
   { id: "temperature", label: "Temperature", controlPrefix: "temperature", sampleValue: "18" }
 ];
 
@@ -805,14 +869,15 @@ export function getFixedMetricCapabilities(
   }
   return WATCHFACE_FIXED_METRICS.flatMap((metric) =>
     Object.prototype.hasOwnProperty.call(resolution.config, metric.rectKey) &&
-    (!metric.fontKey ||
-      Object.prototype.hasOwnProperty.call(resolution.config, metric.fontKey))
-      ? [{
-          id: metric.id,
-          label: metric.label,
-          active: parseConfigRect(resolution.config[metric.rectKey]) !== null
-        }]
-      : []
+          (metric.id === "temperature" ||
+          (!metric.fontKey ||
+            Object.prototype.hasOwnProperty.call(resolution.config, metric.fontKey)))
+        ? [{
+            id: metric.id,
+            label: metric.label,
+            active: parseConfigRect(resolution.config[metric.rectKey]) !== null
+          }]
+        : []
   );
 }
 
@@ -824,12 +889,194 @@ export function getAvailableComplications(
   if (!resolution) {
     return [];
   }
-  return WATCHFACE_COMPLICATIONS.filter(({ controlPrefix }) =>
-    Boolean(
-      parseConfigRect(resolution.config[`control_${controlPrefix}_rect`]) &&
-      findSpriteFolder(resolution, resolution.config[`control_${controlPrefix}_font`])
-    )
+  const hasControlSlot = Object.keys(resolution.config).some((key) =>
+    /^rect_control\d+_pos$/.test(key)
   );
+  return WATCHFACE_COMPLICATIONS.filter((complication) =>
+    complication.id === "temperature" || complication.id === "battery"
+      ? hasControlSlot
+      : Boolean(
+          (complication.valueParts
+            ? complication.valueParts.every(({ rectSuffix }) =>
+                parseConfigRect(
+                  resolution.config[
+                    `control_${complication.controlPrefix}_${rectSuffix}_rect`
+                  ]
+                )
+              )
+            : parseConfigRect(
+                resolution.config[`control_${complication.controlPrefix}_rect`]
+              )) &&
+          findSpriteFolder(
+            resolution,
+            resolution.config[`control_${complication.controlPrefix}_font`]
+          )
+        )
+  );
+}
+
+/** Moves selectable-control icons independently from their value rectangles. */
+export function buildControlIconPositionOverrides(
+  details: CorosWatchfaceTemplateDetails,
+  offsets: Record<string, { dx: number; dy: number }>,
+  /** COROS firmware applies selector-child Y deltas opposite to the editor canvas. */
+  invertVerticalOffset = false
+): CorosWatchfaceConfigOverride[] {
+  const base = pickPreviewResolution(details);
+  if (!base) {
+    return [];
+  }
+  return details.resolutions.flatMap((resolution) => {
+    const scale = resolution.width / base.width;
+    const values: Record<string, string> = {};
+    for (const complication of WATCHFACE_COMPLICATIONS) {
+      const offset = offsets[complication.id];
+      if (!offset) {
+        continue;
+      }
+      const key = `control_${complication.controlPrefix}_icon_pos`;
+      const position = parseConfigPos(resolution.config[key]);
+      if (!position) {
+        continue;
+      }
+      const dy = offset.dy * scale * (invertVerticalOffset ? -1 : 1);
+      values[key] = `{${Math.round(position.x + offset.dx * scale)},${Math.round(position.y + dy)}}`;
+    }
+    return Object.keys(values).length > 0
+      ? [{ path: `${resolution.directory}/config.txt`, values }]
+      : [];
+  });
+}
+
+function controlTemperatureFontFolder(
+  resolution: CorosWatchfaceResolutionDetails
+): PreviewDigitSource | null {
+  for (const key of [
+    "control_temperature_font",
+    "control_step_font",
+    "time_second_high_font",
+    "time_hour_high_font"
+  ]) {
+    const folder = findSpriteFolder(resolution, resolution.config[key]);
+    if (folder) {
+      return folder;
+    }
+  }
+  const folder = resolution.spriteFolders.find(
+    (candidate) => candidate.kind === "digits" && !candidate.aod
+  );
+  return folder ? { folder: folder.folder, files: folder.files } : null;
+}
+
+/** Configures temperature for the selectable control slot, not the fixed block. */
+export function buildControlTemperatureOverrides(
+  details: CorosWatchfaceTemplateDetails,
+  style: WatchfaceMetricSpriteStyle,
+  useStudioFolder = false
+): CorosWatchfaceConfigOverride[] {
+  return details.resolutions.flatMap((resolution) => {
+    const hasControlSlot = Object.keys(resolution.config).some((key) =>
+      /^rect_control\d+_pos$/.test(key)
+    );
+    const source = controlTemperatureFontFolder(resolution);
+    if (!hasControlSlot || !source) {
+      return [];
+    }
+    const ratio = resolution.width / 416;
+    const defaultRect = resolution.config.control_step_rect ||
+      `{${Math.round(35 * ratio)},0,${Math.round(145 * ratio)},${Math.round(35 * ratio)},hcenter|vcenter}`;
+    const baseRect = resolution.config.control_temperature_rect || defaultRect;
+    const values: Record<string, string> = {
+      control_temperature_rect:
+        scaleConfigRectValue(baseRect, style.scale) ?? defaultRect,
+      control_temperature_font: useStudioFolder ? "cl_ctemp" : source.folder
+    };
+    if (style.color) {
+      values.control_temperature_font_color = configHexColor(style.color);
+    }
+    const negative = resolution.config.control_negative_sign_icon ||
+      resolution.icons.find((icon) => /negative/i.test(icon.path))?.path
+        .slice(`${resolution.directory}/`.length)
+        .replace(/\//g, "\\");
+    if (negative) {
+      values.control_negative_sign_icon = negative;
+      if (
+        Object.prototype.hasOwnProperty.call(
+          resolution.config,
+          "control_temperature_negative_sign_icon"
+        )
+      ) {
+        values.control_temperature_negative_sign_icon = negative;
+      }
+    }
+    const temperatureIcon = resolution.config.control_temperature_icon ||
+      resolution.icons.find((icon) => /(?:temperature|temp)/i.test(icon.path))?.path
+        .slice(`${resolution.directory}/`.length)
+        .replace(/\//g, "\\");
+    if (temperatureIcon) {
+      values.control_temperature_icon = temperatureIcon;
+      values.control_temperature_icon_pos =
+        resolution.config.control_temperature_icon_pos ||
+        `{${Math.round(5 * ratio)},${Math.round(4 * ratio)}}`;
+    }
+    return [{ path: `${resolution.directory}/config.txt`, values }];
+  });
+}
+
+/** Generates the ten selectable-temperature digits in an isolated folder. */
+export async function buildControlTemperatureSpriteReplacements(
+  details: CorosWatchfaceTemplateDetails,
+  style: WatchfaceMetricSpriteStyle,
+  fontFamily: string,
+  loadAssets: WatchfaceAssetLoader,
+  typography: WatchfaceTypography = {}
+): Promise<CorosWatchfaceAssetReplacement[]> {
+  const jobs: Array<{
+    source: CorosWatchfaceSpriteFile;
+    path: string;
+    digit: number;
+    width: number;
+    height: number;
+    create: boolean;
+  }> = [];
+  for (const resolution of details.resolutions) {
+    const source = controlTemperatureFontFolder(resolution);
+    if (!source) continue;
+    const scale = Math.max(0.5, Math.min(2, style.scale));
+    source.files.slice(0, 10).forEach((file, digit) => {
+      const path = `${resolution.directory}/cl_ctemp/${String(digit).padStart(2, "0")}.png`;
+      jobs.push({
+        source: file,
+        path,
+        digit,
+        width: Math.max(1, Math.round(file.width * scale)),
+        height: Math.max(1, Math.round(file.height * scale)),
+        create: !resolution.spriteFolders.some((folder) =>
+          folder.files.some((candidate) => candidate.path === path)
+        )
+      });
+    });
+  }
+  const selectedFont = style.fontFamily ?? fontFamily;
+  const assets = selectedFont
+    ? []
+    : await loadAssets([...new Set(jobs.map((job) => job.source.path))]);
+  const byPath = new Map(assets.map((asset) => [asset.path, asset]));
+  return Promise.all(jobs.map(async (job) => ({
+    path: job.path,
+    create: job.create,
+    dataUrl: selectedFont
+      ? renderDigitSprite(
+          String(job.digit), job.width, job.height, selectedFont,
+          style.color ?? "#ffffff", typography
+        )
+      : await resizeAndTintSprite(
+          byPath.get(job.source.path)?.dataUrl ?? "",
+          job.width,
+          job.height,
+          style.color
+        )
+  })));
 }
 
 function metricFontFolder(
@@ -855,25 +1102,6 @@ function metricFontFolder(
   return folder ? { folder: folder.folder, files: folder.files } : null;
 }
 
-function temperatureNegativeSignValue(
-  resolution: CorosWatchfaceResolutionDetails
-): string | undefined {
-  for (const key of [
-    "control_temperature_negative_sign_icon",
-    "control_negative_sign_icon",
-    "negative_sign_icon"
-  ]) {
-    const value = resolution.config[key];
-    if (value) {
-      return value;
-    }
-  }
-  const icon = resolution.icons.find((entry) => /negative/i.test(entry.path));
-  return icon?.path
-    .slice(`${resolution.directory}/`.length)
-    .replace(/\//g, "\\");
-}
-
 function configHexColor(color: string): string {
   return `0x${color.replace(/^#/, "").toUpperCase()}`;
 }
@@ -889,9 +1117,31 @@ export function buildMetricOverrides(
     for (const metric of WATCHFACE_FIXED_METRICS) {
       const enabled = changes[metric.id];
       if (
+        metric.id === "temperature" &&
+        enabled === undefined &&
+        parseConfigRect(resolution.config.temperature_rect)
+      ) {
+        const font = metricFontFolder(resolution, metric);
+        values.temperature_font =
+          resolution.config.temperature_font || font?.folder || "13x19";
+        values.temperature_font_color =
+          resolution.config.temperature_font_color || "0xFFFFFF";
+        if (
+          !resolution.config.temperature_negative_sign_icon &&
+          Object.prototype.hasOwnProperty.call(
+            resolution.config,
+            "temperature_negative_sign_icon"
+          )
+        ) {
+          values.temperature_negative_sign_icon = "icon\\negative.png";
+        }
+        continue;
+      }
+      if (
         enabled === undefined ||
         !Object.prototype.hasOwnProperty.call(resolution.config, metric.rectKey) ||
         (metric.fontKey &&
+          metric.id !== "temperature" &&
           !Object.prototype.hasOwnProperty.call(resolution.config, metric.fontKey))
       ) {
         continue;
@@ -904,22 +1154,17 @@ export function buildMetricOverrides(
         ) {
           values[metric.fontKey] = "";
         }
-        if (metric.negativeSignKey) {
-          values[metric.negativeSignKey] = "";
-        }
-        if (metric.id === "temperature") {
-          for (const key of [
-            "control_temperature_icon_pos",
-            "control_temperature_icon",
-            "control_temperature_rect",
-            "control_temperature_font",
-            "control_temperature_font_color",
-            "control_temperature_negative_sign_icon"
-          ]) {
-            if (Object.prototype.hasOwnProperty.call(resolution.config, key)) {
-              values[key] = "";
-            }
-          }
+        continue;
+      }
+      if (metric.id === "temperature") {
+        const reference = { width: 416, x0: 34, y0: 312, x1: 164, y1: 356 };
+        const ratio = resolution.width / reference.width;
+        values[metric.rectKey] = `{${Math.round(reference.x0 * ratio)},${Math.round(reference.y0 * ratio)},${Math.round(reference.x1 * ratio)},${Math.round(reference.y1 * ratio)},hcenter|vcenter}`;
+        const font = metricFontFolder(resolution, metric);
+        values.temperature_font = font?.folder ?? "13x19";
+        values.temperature_font_color = "0xFFFFFF";
+        if (Object.prototype.hasOwnProperty.call(resolution.config, "temperature_negative_sign_icon")) {
+          values.temperature_negative_sign_icon = "icon\\negative.png";
         }
         continue;
       }
@@ -939,47 +1184,6 @@ export function buildMetricOverrides(
       values[metric.rectKey] = `{${x0},${y0},${x1},${y1},hcenter|vcenter}`;
       if (metric.fontKey) {
         values[metric.fontKey] = font.folder;
-      }
-      if (metric.negativeSignKey) {
-        const negativeSign = temperatureNegativeSignValue(resolution);
-        if (negativeSign) {
-          values[metric.negativeSignKey] = negativeSign;
-        }
-      }
-      if (metric.id === "temperature") {
-        const controlScale = resolution.width / 416;
-        if (Object.prototype.hasOwnProperty.call(resolution.config, "control_temperature_font")) {
-          values.control_temperature_font = font.folder;
-        }
-        if (Object.prototype.hasOwnProperty.call(resolution.config, "control_temperature_rect")) {
-          values.control_temperature_rect =
-            resolution.config.control_temperature_rect ||
-            `{${Math.round(48 * controlScale)},0,${Math.round(145 * controlScale)},${Math.max(1, Math.round(33 * controlScale))},hcenter|vcenter}`;
-        }
-        const weatherIcon = resolution.icons.find((entry) =>
-          /\/weather\.png$/i.test(entry.path)
-        );
-        if (
-          weatherIcon &&
-          Object.prototype.hasOwnProperty.call(resolution.config, "control_temperature_icon")
-        ) {
-          values.control_temperature_icon = weatherIcon.path
-            .slice(`${resolution.directory}/`.length)
-            .replace(/\//g, "\\");
-          if (Object.prototype.hasOwnProperty.call(resolution.config, "control_temperature_icon_pos")) {
-            values.control_temperature_icon_pos = `{${Math.round(10 * controlScale)},0}`;
-          }
-        }
-        const negativeSign = temperatureNegativeSignValue(resolution);
-        if (
-          negativeSign &&
-          Object.prototype.hasOwnProperty.call(
-            resolution.config,
-            "control_temperature_negative_sign_icon"
-          )
-        ) {
-          values.control_temperature_negative_sign_icon = negativeSign;
-        }
       }
     }
     if (Object.keys(values).length > 0) {
@@ -1038,33 +1242,6 @@ export function buildMetricStyleOverrides(
       if (metric.fontColorKey && style.color) {
         values[metric.fontColorKey] = configHexColor(style.color);
       }
-      if (metric.id === "temperature") {
-        const controlRect = scaleConfigRectValue(
-          resolution.config.control_temperature_rect ?? "",
-          style.scale
-        );
-        if (controlRect) {
-          values.control_temperature_rect = controlRect;
-        }
-        if (
-          useStudioFolders &&
-          Object.prototype.hasOwnProperty.call(
-            resolution.config,
-            "control_temperature_font"
-          )
-        ) {
-          values.control_temperature_font = METRIC_STUDIO_FOLDERS.temperature;
-        }
-        if (
-          style.color &&
-          Object.prototype.hasOwnProperty.call(
-            resolution.config,
-            "control_temperature_font_color"
-          )
-        ) {
-          values.control_temperature_font_color = configHexColor(style.color);
-        }
-      }
     }
     if (Object.keys(values).length > 0) {
       overrides.push({ path: `${resolution.directory}/config.txt`, values });
@@ -1089,6 +1266,7 @@ export async function buildMetricSpriteReplacements(
     height: number;
     color?: string;
     fontFamily: string;
+    create: boolean;
   }[] = [];
   for (const resolution of details.resolutions) {
     for (const metric of WATCHFACE_FIXED_METRICS) {
@@ -1101,14 +1279,19 @@ export async function buildMetricSpriteReplacements(
       const normalizedScale = Math.max(0.5, Math.min(2, style.scale));
       const metricFontFamily = style.fontFamily ?? fontFamily;
       source.files.slice(0, 10).forEach((file, digit) => {
+        const path = `${resolution.directory}/${METRIC_STUDIO_FOLDERS[metric.id]}/${String(digit).padStart(2, "0")}.png`;
+        const existsInTemplate = resolution.spriteFolders.some((folder) =>
+          folder.files.some((candidate) => candidate.path === path)
+        );
         jobs.push({
           source: file,
-          path: `${resolution.directory}/${METRIC_STUDIO_FOLDERS[metric.id]}/${String(digit).padStart(2, "0")}.png`,
+          path,
           digit,
           width: Math.max(1, Math.round(file.width * normalizedScale)),
           height: Math.max(1, Math.round(file.height * normalizedScale)),
           color: style.color,
-          fontFamily: metricFontFamily
+          fontFamily: metricFontFamily,
+          create: !existsInTemplate
         });
       });
     }
@@ -1139,7 +1322,7 @@ export async function buildMetricSpriteReplacements(
           job.height,
           job.color
         );
-    replacements.push({ path: job.path, dataUrl, create: true });
+    replacements.push({ path: job.path, dataUrl, create: job.create });
   }
   return replacements;
 }
@@ -1518,7 +1701,7 @@ export const WATCHFACE_LAYOUT_GROUPS: WatchfaceLayoutGroup[] = [
   {
     id: "battery",
     label: "Battery",
-    patterns: [/^battery_level_rect$/]
+    patterns: [/^battery_level_rect$/, /^battery_icon_pos$/]
   },
   {
     id: "complication",
@@ -1877,6 +2060,16 @@ function spriteSizeForPosKey(
         return { width: icon.width, height: icon.height };
       }
     }
+    const iconDir = resolution.config[posKey.replace(/_pos$/, "_dir")]
+      ?.replace(/\\/g, "/");
+    const state = iconDir
+      ? resolution.spriteFolders.find(
+          (folder) => folder.kind === "state" && folder.folder === iconDir
+        )?.files[0]
+      : undefined;
+    if (state) {
+      return { width: state.width, height: state.height };
+    }
   } else {
     const fontValue = resolution.config[posKey.replace(/_pos$/, "_font")];
     const folder = fontValue
@@ -2065,6 +2258,24 @@ export async function drawStudioPreview(
     wantedSprites.set(weekFile.path, { color: weekColor });
   }
 
+  const batteryFolderName = (
+    config.control_battery_icon_dir || config.battery_icon_dir
+  )?.replace(/\\/g, "/");
+  const batteryFolder = batteryFolderName
+    ? resolution.spriteFolders.find(
+        (folder) => folder.kind === "state" && folder.folder === batteryFolderName
+      )
+    : null;
+  // Prefer a normal high-charge state; the last entries can represent special
+  // charging/low-power states in COROS's 12-image battery sets.
+  const batteryFile = batteryFolder?.files[
+    Math.min(8, Math.max(0, batteryFolder.files.length - 1))
+  ] ?? null;
+  const batteryIconPos = parseConfigPos(config.battery_icon_pos);
+  if (batteryFile) {
+    wantedSprites.set(batteryFile.path, { color: null });
+  }
+
   const availableComplications = getAvailableComplications(details);
   const complication =
     availableComplications.find((item) => item.id === options.previewComplication) ??
@@ -2077,32 +2288,52 @@ export async function drawStudioPreview(
   const controlOrigin = parseConfigPos(
     controlOriginKey ? config[controlOriginKey] : undefined
   ) ?? { x: 0, y: 0 };
-  const relativeComplicationRect = complicationPrefix
-    ? parseConfigRect(config[`control_${complicationPrefix}_rect`])
-    : null;
-  const complicationRect = relativeComplicationRect
-    ? {
-        x0: relativeComplicationRect.x0 + controlOrigin.x,
-        y0: relativeComplicationRect.y0 + controlOrigin.y,
-        x1: relativeComplicationRect.x1 + controlOrigin.x,
-        y1: relativeComplicationRect.y1 + controlOrigin.y
-      }
-    : null;
+  const relativeComplicationRects = complicationPrefix && complication
+    ? (complication.valueParts ?? [{ rectSuffix: null, sampleValue: complication.sampleValue }])
+        .flatMap(({ rectSuffix, sampleValue }) => {
+          const key = complication.id === "battery"
+            ? "control_battery_level_rect"
+            : rectSuffix
+              ? `control_${complicationPrefix}_${rectSuffix}_rect`
+              : `control_${complicationPrefix}_rect`;
+          const rect = parseConfigRect(config[key]);
+          return rect ? [{ rect, sampleValue }] : [];
+        })
+    : [];
+  const relativeComplicationRect = relativeComplicationRects[0]?.rect ?? null;
   const complicationSource = complicationPrefix
-    ? findSpriteFolder(resolution, config[`control_${complicationPrefix}_font`])
+    ? findSpriteFolder(
+        resolution,
+        complication?.id === "battery"
+          ? config.control_battery_level_font
+          : config[`control_${complicationPrefix}_font`]
+      )
     : null;
   const complicationIconValue = complicationPrefix
-    ? config[`control_${complicationPrefix}_icon`]?.replace(/\\/g, "/")
+    ? complication?.id === "battery"
+      ? undefined
+      : config[`control_${complicationPrefix}_icon`]?.replace(/\\/g, "/")
     : undefined;
   const complicationIconPath = complicationIconValue
     ? `${resolution.directory}/${complicationIconValue}`
     : null;
   const complicationIcon = complicationIconPath
     ? resolution.icons.find((icon) => icon.path === complicationIconPath) ?? null
+    : complication?.id === "battery"
+      ? batteryFile
+      : null;
+  const configuredComplicationIconPos = complicationPrefix
+    ? parseConfigPos(
+        config[`control_${complicationPrefix}_icon_pos`]
+      )
     : null;
-  const relativeComplicationIconPos = complicationPrefix
-    ? parseConfigPos(config[`control_${complicationPrefix}_icon_pos`])
-    : null;
+  const relativeComplicationIconPos = configuredComplicationIconPos ??
+    (complication?.id === "battery" && relativeComplicationRect
+      ? {
+          x: Math.max(0, relativeComplicationRect.x0 - Math.round(resolution.width * 0.05)),
+          y: relativeComplicationRect.y0
+        }
+      : null);
   const complicationIconPos = relativeComplicationIconPos
     ? {
         x: relativeComplicationIconPos.x + controlOrigin.x,
@@ -2124,13 +2355,20 @@ export async function drawStudioPreview(
     datePartId?: WatchfaceDatePartId;
     componentId?: string;
   }[] = [];
-  if (complication && complicationRect && complicationSource) {
-    numberPlans.push({
-      rect: complicationRect,
-      source: complicationSource,
-      value: complication.sampleValue,
-      componentId: "complication"
-    });
+  if (complication && complicationSource) {
+    for (const part of relativeComplicationRects) {
+      numberPlans.push({
+        rect: {
+          x0: part.rect.x0 + controlOrigin.x,
+          y0: part.rect.y0 + controlOrigin.y,
+          x1: part.rect.x1 + controlOrigin.x,
+          y1: part.rect.y1 + controlOrigin.y
+        },
+        source: complicationSource,
+        value: part.sampleValue,
+        componentId: "complication"
+      });
+    }
   }
   const batteryRect = parseConfigRect(config["battery_level_rect"]);
   const batterySource = findSpriteFolder(
@@ -2373,6 +2611,19 @@ export async function drawStudioPreview(
     }
   }
 
+  if (batteryFile && batteryIconPos) {
+    const image = loaded.get(batteryFile.path);
+    if (image) {
+      context.drawImage(
+        image,
+        batteryIconPos.x * scale,
+        batteryIconPos.y * scale,
+        batteryFile.width * scale,
+        batteryFile.height * scale
+      );
+    }
+  }
+
   if (weekFile && weekRect) {
     const weekStyle = options.dateStyles?.weekday;
     const weekFontFamily = weekStyle?.fontFamily ?? options.fontFamily;
@@ -2419,6 +2670,45 @@ export async function drawStudioPreview(
         complicationIcon.height * scale
       );
     }
+  } else if (complication?.id === "battery" && complicationIconPos) {
+    // Some watches offer Battery as a firmware control even though the source
+    // template contains no battery control PNG. Draw a preview-only glyph so
+    // the editor still represents the on-watch selector without exporting an
+    // invented asset or unsupported config key.
+    const sharedIconValue = config.control_step_icon?.replace(/\\/g, "/");
+    const sharedIcon = sharedIconValue
+      ? resolution.icons.find(
+          (icon) => icon.path === `${resolution.directory}/${sharedIconValue}`
+        )
+      : null;
+    const width = sharedIcon?.width ?? Math.max(22, Math.round(resolution.width * 0.045));
+    const height = sharedIcon?.height ?? Math.max(14, Math.round(width * 0.58));
+    const x = complicationIconPos.x * scale;
+    const y = complicationIconPos.y * scale;
+    const w = width * scale;
+    const h = height * scale;
+    const terminalWidth = Math.max(2, w * 0.1);
+    const terminalHeight = h * 0.38;
+    const stroke = Math.max(1.5, h * 0.1);
+    const color = options.layerColors?.complication ?? options.digitColor;
+    context.save();
+    context.strokeStyle = color;
+    context.fillStyle = color;
+    context.lineWidth = stroke;
+    context.strokeRect(x + stroke / 2, y + stroke / 2, w - terminalWidth - stroke, h - stroke);
+    context.fillRect(
+      x + w - terminalWidth,
+      y + (h - terminalHeight) / 2,
+      terminalWidth,
+      terminalHeight
+    );
+    context.fillRect(
+      x + stroke * 1.6,
+      y + stroke * 1.6,
+      Math.max(1, (w - terminalWidth - stroke * 3.2) * 0.82),
+      Math.max(1, h - stroke * 3.2)
+    );
+    context.restore();
   }
 
   const styledMetricGlyphs = new Map<string, HTMLImageElement>();
@@ -2525,13 +2815,21 @@ export async function drawStudioPreview(
     const width = Math.max(1, Math.round(ampmFile.width * ampmScale));
     const height = Math.max(1, Math.round(ampmFile.height * ampmScale));
     const sourceDataUrl = loadedAssets.get(ampmFile.path)?.dataUrl;
-    if (sourceDataUrl) {
-      const dataUrl = await resizeAndTintSprite(
-        sourceDataUrl,
-        width,
-        height,
-        ampmStyle.color
-      );
+    if (sourceDataUrl || ampmStyle.fontFamily) {
+      const dataUrl = ampmStyle.fontFamily
+        ? renderDigitSprite(
+            now.getHours() < 12 ? "AM" : "PM",
+            width,
+            height,
+            ampmStyle.fontFamily,
+            ampmStyle.color
+          )
+        : await resizeAndTintSprite(
+            sourceDataUrl!,
+            width,
+            height,
+            ampmStyle.color
+          );
       context.drawImage(
         await loadStudioImage(dataUrl),
         ampmStyle.x * scale,

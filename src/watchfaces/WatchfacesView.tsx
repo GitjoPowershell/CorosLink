@@ -24,6 +24,7 @@ import type {
   CorosWatchfaceRegion,
   CorosWatchfaceShareLink,
   CorosWatchfaceStatus,
+  CorosWatchfaceThemeCatalog,
   CorosWatchfaceTheme
 } from "../../electron/types";
 
@@ -62,6 +63,11 @@ export function WatchfacesView({ api }: WatchfacesViewProps) {
   const [backgroundImageId, setBackgroundImageId] = useState("13");
   const [language, setLanguage] = useState("en-US");
   const [maxWatchFaceVersion, setMaxWatchFaceVersion] = useState("5");
+  const [themeCatalog, setThemeCatalog] = useState<CorosWatchfaceThemeCatalog>(
+    "editable"
+  );
+  const [watchSerial, setWatchSerial] = useState("");
+  const [modelVersion, setModelVersion] = useState("W332-3.1708.0");
   const [themes, setThemes] = useState<CorosWatchfaceTheme[]>([]);
   const [themesLoaded, setThemesLoaded] = useState(false);
   const [themeSearch, setThemeSearch] = useState("");
@@ -154,14 +160,18 @@ export function WatchfacesView({ api }: WatchfacesViewProps) {
       const nextThemes = await api.listCorosWatchfaceThemes({
         firmwareType,
         language,
-        maxWatchFaceVersion: Number(maxWatchFaceVersion)
+        maxWatchFaceVersion: Number(maxWatchFaceVersion),
+        catalog: themeCatalog,
+        ...(themeCatalog !== "editable"
+          ? { snCode: watchSerial, modelVersion }
+          : {})
       });
       setThemes(nextThemes);
       setThemesLoaded(true);
       setNotice(
         nextThemes.length === 1
-          ? "Loaded 1 official COROS source template."
-          : `Loaded ${nextThemes.length} official COROS source templates.`
+          ? `Loaded 1 ${watchfaceCatalogLabel(themeCatalog)}.`
+          : `Loaded ${nextThemes.length} ${watchfaceCatalogLabel(themeCatalog)}.`
       );
     } catch (caught) {
       setError(toErrorMessage(caught));
@@ -476,14 +486,29 @@ export function WatchfacesView({ api }: WatchfacesViewProps) {
               <span className="watchfaces-panel-icon"><LayoutGrid size={20} /></span>
               <div>
                 <p className="eyebrow">Step 2</p>
-                <h2>Choose an editable COROS template</h2>
+                <h2>Browse COROS watchface files</h2>
               </div>
             </div>
             <p className="watchfaces-muted">
-              Load the source templates COROS provides for this watch model,
-              then use one as the foundation for the designer below.
+              Browse editable source templates, official watch faces, or your
+              custom watch faces. Download every package COROS exposes.
             </p>
             <form className="watchfaces-theme-form" onSubmit={handleLoadThemes}>
+              <label className="field">
+                Catalog
+                <select
+                  value={themeCatalog}
+                  onChange={(event) => {
+                    setThemeCatalog(event.target.value as CorosWatchfaceThemeCatalog);
+                    setThemes([]);
+                    setThemesLoaded(false);
+                  }}
+                >
+                  <option value="editable">Editable templates</option>
+                  <option value="official">Official watch faces</option>
+                  <option value="custom">My custom watch faces</option>
+                </select>
+              </label>
               <label className="field">
                 Firmware type
                 <input value={firmwareType} onChange={(event) => setFirmwareType(event.target.value)} required />
@@ -496,16 +521,38 @@ export function WatchfacesView({ api }: WatchfacesViewProps) {
                 Max watchface version
                 <input type="number" min="0" max="999" step="1" value={maxWatchFaceVersion} onChange={(event) => setMaxWatchFaceVersion(event.target.value)} required />
               </label>
+              {themeCatalog !== "editable" ? (
+                <>
+                  <label className="field">
+                    Watch serial number
+                    <input
+                      value={watchSerial}
+                      onChange={(event) => setWatchSerial(event.target.value)}
+                      placeholder="snCode"
+                      autoComplete="off"
+                      required
+                    />
+                  </label>
+                  <label className="field">
+                    Model version
+                    <input
+                      value={modelVersion}
+                      onChange={(event) => setModelVersion(event.target.value)}
+                      placeholder="W332-3.1708.0"
+                    />
+                  </label>
+                </>
+              ) : null}
               <button className="secondary-button" type="submit" disabled={busy !== null}>
                 {busy === "themes" ? <Loader2 className="spin" size={16} /> : <LayoutGrid size={16} />}
-                {themesLoaded ? "Refresh templates" : "Load templates"}
+                {themesLoaded ? "Refresh catalog" : "Load catalog"}
               </button>
             </form>
 
             {themesLoaded ? (
               <div className="watchfaces-theme-results">
                 <div className="watchfaces-theme-results-heading">
-                  <strong>{themes.length} template{themes.length === 1 ? "" : "s"} available</strong>
+                  <strong>{themes.length} file{themes.length === 1 ? "" : "s"} available</strong>
                   <label className="watchfaces-theme-search">
                     <Search size={15} aria-hidden="true" />
                     <input value={themeSearch} onChange={(event) => setThemeSearch(event.target.value)} placeholder="Filter templates" aria-label="Filter COROS templates" />
@@ -551,7 +598,7 @@ export function WatchfacesView({ api }: WatchfacesViewProps) {
                               ) : (
                                 <Download size={14} />
                               )}
-                              Use as template
+                              {themeCatalog === "editable" ? "Use as template" : "Download file"}
                             </button>
                           ) : null}
                         </div>
@@ -561,7 +608,7 @@ export function WatchfacesView({ api }: WatchfacesViewProps) {
                 ) : (
                   <p className="watchfaces-empty-themes">
                     {themes.length === 0
-                      ? "COROS returned no editable templates for this watch model and version."
+                      ? `COROS returned no ${watchfaceCatalogLabel(themeCatalog)} for this watch model and version.`
                       : "No loaded templates match that filter."}
                   </p>
                 )}
@@ -750,6 +797,17 @@ function formatBytes(value: number): string {
     return `${Math.max(1, Math.round(value / 1024))} KB`;
   }
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function watchfaceCatalogLabel(catalog: CorosWatchfaceThemeCatalog): string {
+  switch (catalog) {
+    case "official":
+      return "official watch faces";
+    case "custom":
+      return "custom watch faces";
+    default:
+      return "editable source templates";
+  }
 }
 
 function formatExpiry(value: string): string {

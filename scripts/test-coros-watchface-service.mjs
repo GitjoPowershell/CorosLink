@@ -10,6 +10,7 @@ const distUrl = (file) =>
   pathToFileURL(path.join(repoRoot, "dist-electron", file)).href;
 
 const {
+  applyCorosWatchfaceConfigOverrides,
   buildCreateLinkBody,
   buildMobileLoginRegion,
   encryptMobileLoginField,
@@ -22,6 +23,41 @@ const {
 } = await import(`${distUrl("corosWatchfaceService.js")}?cacheBust=${Date.now()}`);
 const { createStoreZip } = await import(
   `${distUrl("zipStore.js")}?cacheBust=${Date.now()}`
+);
+
+const configWithoutWeather = "[time_hour_high_pos]={1,2}\r\n";
+assert.equal(
+  applyCorosWatchfaceConfigOverrides(configWithoutWeather, {
+    weather_icon_pos: "{187,57}",
+    weather_icon_dir: "weather"
+  }),
+  "[time_hour_high_pos]={1,2}\r\n[weather_icon_pos]={187,57}\r\n[weather_icon_dir]=weather\r\n",
+  "confirmed optional weather keys should be appended without changing CRLF"
+);
+assert.throws(
+  () => applyCorosWatchfaceConfigOverrides(configWithoutWeather, { weather_typo: "x" }),
+  /does not define: weather_typo/,
+  "unknown config keys must still be rejected"
+);
+assert.equal(
+  applyCorosWatchfaceConfigOverrides(configWithoutWeather, {
+    control_temperature_rect: "{35,0,145,35,hcenter|vcenter}",
+    control_temperature_font: "cl_ctemp",
+    control_temperature_font_color: "0xFFFFFF",
+    control_negative_sign_icon: "icon\\negative.png"
+  }),
+  "[time_hour_high_pos]={1,2}\r\n[control_temperature_rect]={35,0,145,35,hcenter|vcenter}\r\n[control_temperature_font]=cl_ctemp\r\n[control_temperature_font_color]=0xFFFFFF\r\n[control_negative_sign_icon]=icon\\negative.png\r\n",
+  "confirmed control-temperature keys should be appendable"
+);
+assert.equal(
+  applyCorosWatchfaceConfigOverrides(configWithoutWeather, {
+    temperature_rect: "{120,180,296,240,hcenter|vcenter}",
+    temperature_font: "13x19",
+    temperature_font_color: "0xFFFFFF",
+    temperature_negative_sign_icon: "icon\\negative.png"
+  }),
+  "[time_hour_high_pos]={1,2}\r\n[temperature_rect]={120,180,296,240,hcenter|vcenter}\r\n[temperature_font]=13x19\r\n[temperature_font_color]=0xFFFFFF\r\n[temperature_negative_sign_icon]=icon\\negative.png\r\n",
+  "confirmed fixed-temperature keys should be appendable"
 );
 
 assert.equal(
@@ -110,6 +146,36 @@ assert.deepEqual(
     }
   ],
   "theme-list normalizer should accept the mobile shape and reject non-HTTPS previews"
+);
+
+assert.deepEqual(
+  normalizeCorosWatchfaceThemes(
+    {
+      watchFaceTemplateList: [
+        {
+          watchFaceTemplateId: "478814257230741704",
+          watchFaceTemplateName: "My custom summit face",
+          watchFaceTemplatePreviewImageUrl: "https://s3.coros.com/custom/summit-preview.png",
+          watchFaceTemplateUserCustomUrl: "https://s3.coros.com/custom/summit-face.dat",
+          firmwareType: "COROS W332"
+        }
+      ],
+      watchFaceThemeList: [
+        { watchFaceList: [{ id: 123, watchFaceName: "Official only" }] }
+      ]
+    },
+    "custom"
+  ),
+  [
+    {
+      id: "478814257230741704",
+      name: "My custom summit face",
+      previewImageUrl: "https://s3.coros.com/custom/summit-preview.png",
+      packageUrl: "https://s3.coros.com/custom/summit-face.dat",
+      firmwareType: "COROS W332"
+    }
+  ],
+  "custom catalog should select only the signed-in user's faces and retain their download URL"
 );
 
 assert.deepEqual(

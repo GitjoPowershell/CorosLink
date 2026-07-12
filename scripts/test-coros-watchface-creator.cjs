@@ -42,6 +42,8 @@ const FIXTURE_CONFIG = [
   "[time_hour_low_font]=01",
   "[english_date_week_rect]={520,120,667,187,hcenter|vcenter}",
   "[english_date_week_font]=english_week",
+  "[battery_icon_pos]={94,80}",
+  "[battery_icon_dir]=battery",
   "[control_step_icon]=icon\\step.png",
   "[control_step_icon_pos]={526,536}",
   "[empty_value]="
@@ -79,6 +81,10 @@ async function main() {
     fixtureEntries.push({
       name: `watchface_800x800/01/0${digit}.png`,
       data: sourceDigit
+    });
+    fixtureEntries.push({
+      name: `watchface_800x800/battery/0${digit}.png`,
+      data: sourceIcon
     });
   }
   for (let day = 0; day < 7; day += 1) {
@@ -134,11 +140,38 @@ async function main() {
   assert.equal(updatedProject.name, "Updated creator fixture");
   const projectList = await watchfaces.listCorosWatchfaceProjects();
   assert.equal(projectList.some((project) => project.projectId === savedProject.projectId), true);
+  const nestedProjectStarter = path.join(
+    app.getPath("userData"),
+    "watchface-projects",
+    savedProject.projectId,
+    "starter.dat"
+  );
+  await fs.writeFile(
+    nestedProjectStarter,
+    createStoreZip([
+      ...fixtureEntries.map((entry) => ({
+        name: `starter/${entry.name}`,
+        data: entry.data
+      })),
+      { name: "__MACOSX/starter/._info.json", data: Buffer.from("metadata") },
+      { name: "starter/.DS_Store", data: Buffer.from("metadata") }
+    ])
+  );
   const loadedProject = await watchfaces.loadCorosWatchfaceProject(
     savedProject.projectId
   );
   assert.equal(loadedProject.archive.sourceTemplateId, 250601);
   assert.equal(loadedProject.design.backgroundColor, "#123456");
+  const repairedProjectZip = await unzipper.Open.file(nestedProjectStarter);
+  assert.ok(
+    repairedProjectZip.files.some((entry) => entry.path === "info.json"),
+    "a Finder-wrapped project starter should be flattened automatically"
+  );
+  assert.equal(
+    repairedProjectZip.files.some((entry) => entry.path.startsWith("starter/")),
+    false
+  );
+  await fs.access(`${nestedProjectStarter}.nested-backup`);
   await watchfaces.deleteCorosWatchfaceProject(savedProject.projectId);
   assert.equal(
     (await watchfaces.listCorosWatchfaceProjects()).some(
@@ -168,6 +201,13 @@ async function main() {
     { width: digitFolder.files[0].width, height: digitFolder.files[0].height },
     { width: 12, height: 20 }
   );
+
+  const batteryFolder = resolution.spriteFolders.find(
+    (folder) => folder.folder === "battery"
+  );
+  assert.ok(batteryFolder, "battery state folder should be discovered");
+  assert.equal(batteryFolder.kind, "state");
+  assert.equal(batteryFolder.files.length, 10);
 
   const weekFolder = resolution.spriteFolders.find(
     (folder) => folder.folder === "english_week"
@@ -283,6 +323,53 @@ async function main() {
   );
   assert.ok(generatedSpriteEntry, "a generated studio sprite should be added to the archive");
   assert.deepEqual(await generatedSpriteEntry.buffer(), generatedMetricDigit);
+  assert.ok(
+    generatedSpriteZip.files.findIndex(
+      (entry) => entry.path === "watchface_800x800/cl_hh/00.png"
+    ) < generatedSpriteZip.files.findIndex(
+      (entry) => entry.path === "watchface_800x800/config.txt"
+    ),
+    "new resource folders must precede their config for COROS's compiler"
+  );
+
+  // --- Selectable-control temperature digits and optional config keys ----
+  const withTemperature = await watchfaces.createCorosWatchfaceArchive({
+    sourceArchiveId: starter.archiveId,
+    backgroundDataUrl: pngDataUrl(icon),
+    assetReplacements: [
+      {
+        path: "watchface_800x800/cl_ctemp/00.png",
+        dataUrl: pngDataUrl(generatedMetricDigit),
+        create: true
+      }
+    ],
+    configOverrides: [
+      {
+        path: "watchface_800x800/config.txt",
+        values: {
+          control_temperature_rect: "{67,0,279,67,hcenter|vcenter}",
+          control_temperature_font: "cl_ctemp",
+          control_temperature_font_color: "0xFFFFFF",
+          control_negative_sign_icon: "icon\\negative.png"
+        }
+      }
+    ]
+  });
+  const temperatureOutput = await findCreatorOutput(withTemperature);
+  assert.ok(temperatureOutput, "control-temperature output should be available");
+  const temperatureZip = await unzipper.Open.file(temperatureOutput.path);
+  const temperatureDigit = temperatureZip.files.find(
+    (entry) => entry.type === "File" && entry.path === "watchface_800x800/cl_ctemp/00.png"
+  );
+  assert.ok(temperatureDigit, "the control-temperature digit folder should be created");
+  const temperatureConfigEntry = temperatureZip.files.find(
+    (entry) => entry.type === "File" && entry.path === "watchface_800x800/config.txt"
+  );
+  assert.ok(temperatureConfigEntry, "control-temperature config should remain present");
+  const temperatureConfig = (await temperatureConfigEntry.buffer()).toString("utf8");
+  assert.ok(temperatureConfig.includes("[control_temperature_font]=cl_ctemp"));
+  assert.ok(temperatureConfig.includes("[control_temperature_font_color]=0xFFFFFF"));
+  assert.ok(temperatureConfig.includes("[control_negative_sign_icon]=icon\\negative.png"));
 
   // --- Replacement validation ---------------------------------------------
   await assert.rejects(

@@ -23,6 +23,7 @@ import {
   type WatchfaceTimeStyles,
   type WatchfaceTimePartId
 } from "./watchfaceStudio";
+import { getWeatherCapability } from "./weatherAssets";
 
 /**
  * The editor treats the watchface as a stack of layers. Unlike a freeform
@@ -40,6 +41,7 @@ export type EditorLayerKind =
   | "battery"
   | "complication"
   | "metric"
+  | "weather"
   | "customSprite";
 
 /** Which inspector controls a layer supports. */
@@ -70,6 +72,8 @@ export interface EditorLayer {
   staticSeparatorId?: WatchfaceStaticSeparatorId;
   /** Set for the firmware-swapped AM/PM sprite pair. */
   ampmIndicator?: true;
+  /** Set for the dynamic 41-state weather sprite folder. */
+  weatherIndicator?: true;
   visible: boolean;
   /** Whether the user may hide/remove this layer. */
   canHide: boolean;
@@ -221,7 +225,10 @@ export function deriveEditorLayers(
       layers.push({
         id: groupId,
         kind: "metric",
-        label: capability.label,
+        label:
+          metricId === "temperature"
+            ? "Temperature (always visible)"
+            : capability.label,
         layoutGroupId: groupId,
         metricId,
         visible,
@@ -320,6 +327,37 @@ export function deriveEditorLayers(
     };
     const dateSlashIndex = layers.findIndex((layer) => layer.id === "staticDateSlash");
     layers.splice(dateSlashIndex >= 0 ? dateSlashIndex + 1 : 2, 0, ampmLayer);
+  }
+
+  const weatherCapability = getWeatherCapability(details);
+  if (weatherCapability) {
+    const style = design.weatherIndicator ?? {
+      enabled: weatherCapability.active,
+      ...weatherCapability.defaultPos,
+      scale: 1
+    };
+    const width = weatherCapability.size.width * style.scale;
+    const height = weatherCapability.size.height * style.scale;
+    layers.splice(1, 0, {
+      id: "weather",
+      kind: "weather",
+      label: "Weather icon",
+      weatherIndicator: true,
+      visible: style.enabled,
+      canHide: true,
+      present: true,
+      bounds: style.enabled
+        ? {
+            id: "weather",
+            label: "Weather icon",
+            x0: style.x,
+            y0: style.y,
+            x1: style.x + width,
+            y1: style.y + height
+          }
+        : null,
+      capabilities: { position: true, color: false, scale: true, font: false }
+    });
   }
 
   for (const sprite of design.designSprites ?? []) {

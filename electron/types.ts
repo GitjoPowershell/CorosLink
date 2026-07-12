@@ -98,14 +98,22 @@ export interface CorosWatchfaceStatus {
   suggestedRegion: CorosWatchfaceRegion;
 }
 
-/** Parameters required by COROS's official editable-template catalog request. */
+/** A source-template, on-watch, or user-created watchface catalog. */
+export type CorosWatchfaceThemeCatalog = "editable" | "official" | "custom";
+
+/** Parameters required by a COROS watchface catalog request. */
 export interface CorosWatchfaceThemeListInput {
   firmwareType: string;
   language?: string;
   maxWatchFaceVersion?: number;
+  /** On-watch and custom-face catalogs require the watch serial (`snCode`). */
+  snCode?: string;
+  /** Optional firmware model header captured from the mobile app. */
+  modelVersion?: string;
+  catalog?: CorosWatchfaceThemeCatalog;
 }
 
-/** An entry returned by the official COROS editable-template catalog. */
+/** An entry returned by a COROS watchface catalog. */
 export interface CorosWatchfaceTheme {
   id?: string;
   name: string;
@@ -216,13 +224,13 @@ export interface CorosWatchfaceSpriteFile {
 }
 
 /**
- * A bitmap-font folder inside a resolution directory: `digits` folders hold
- * 00.png–09.png, `week` folders hold 00.png–06.png weekday labels.
+ * A numbered sprite folder inside a resolution directory. `state` folders are
+ * firmware-swapped icon sets such as battery and weather, never bitmap fonts.
  */
 export interface CorosWatchfaceSpriteFolder {
   /** Folder path relative to the resolution directory, e.g. "01" or "a/01". */
   folder: string;
-  kind: "digits" | "week";
+  kind: "digits" | "week" | "state";
   /** True when the folder belongs to the always-on-display asset tree. */
   aod: boolean;
   files: CorosWatchfaceSpriteFile[];
@@ -258,6 +266,8 @@ export interface CorosWatchfaceThemeDownload {
   archive?: CorosWatchfaceArchive;
   /** Top-level entries when the package is a ZIP but not a starter template. */
   entries?: string[];
+  /** Local copy retained so it can be inspected or shared. */
+  savedPath?: string;
   message: string;
 }
 
@@ -373,6 +383,8 @@ export interface CorosWatchfaceDesignState {
   previewComplication: string;
   metricChanges: Record<string, boolean>;
   metricStyles: Record<string, { color?: string; scale: number; fontFamily?: string }>;
+  /** Per selectable-control icon offsets, independent from the slot origin/value. */
+  controlIconOffsets?: Record<string, { dx: number; dy: number }>;
   timeStyles: Record<string, { color?: string; scale: number; fontFamily?: string }>;
   /** Weekday/month/day scaling; absent in projects saved before resizing. */
   dateStyles?: Record<
@@ -397,6 +409,14 @@ export interface CorosWatchfaceDesignState {
     y: number;
     scale: number;
     color: string;
+    fontFamily?: string;
+  };
+  /** Dynamic 41-state weather icon; absent in older projects. */
+  weatherIndicator?: {
+    enabled: boolean;
+    x: number;
+    y: number;
+    scale: number;
   };
   layoutOffsets: Record<string, { dx: number; dy: number }>;
   /** Visibility overrides for firmware-backed editor layers. */
