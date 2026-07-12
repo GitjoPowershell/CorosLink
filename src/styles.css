@@ -3357,16 +3357,6 @@ td span {
   transform: translateY(-1px);
 }
 
-/* Official COROS custom-watchface hand-off. */
-.watchfaces-view {
-  width: min(1080px, 100%);
-  margin: 0 auto;
-  padding: 8px 0 28px;
-}
-.watchfaces-view.is-editor-mode {
-  width: min(1480px, 100%);
-}
-
 .watchfaces-hero {
   display: flex;
   align-items: flex-start;
@@ -3807,27 +3797,6 @@ td span {
   font-size: 11px;
 }
 
-.watchface-creator {
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 85% 15%, rgba(81, 224, 181, 0.13), transparent 30%),
-    linear-gradient(145deg, rgba(31, 182, 166, 0.06), transparent 48%),
-    var(--glass-bg);
-}
-
-.watchface-creator-layout {
-  display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(340px, 0.9fr);
-  align-items: start;
-  gap: 26px;
-}
-
-.watchface-creator-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
 .watchface-color-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3880,12 +3849,6 @@ td span {
   opacity: 0.45;
 }
 
-.watchface-creator-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
 .watchface-zoom-control span {
   color: var(--accent-strong);
   font-weight: 700;
@@ -3894,40 +3857,6 @@ td span {
 .watchface-zoom-control input[type="range"] {
   width: 100%;
   accent-color: var(--accent);
-}
-
-.watchface-create-button {
-  align-self: flex-start;
-}
-
-.watchface-creator-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.watchface-creator-note svg {
-  margin-top: 2px;
-  flex: 0 0 auto;
-  color: var(--accent-strong);
-}
-
-.watchface-creator-preview-shell {
-  display: grid;
-  place-items: center;
-  align-content: center;
-  gap: 12px;
-  min-height: 360px;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  background: rgba(0, 0, 0, 0.16);
-  padding: 20px;
-  position: sticky;
-  top: 18px;
 }
 
 .watchface-preview-stack {
@@ -4640,80 +4569,6 @@ td span {
   font-size: 12px;
 }
 
-.watchface-creator-preview-shell > p {
-  max-width: 310px;
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 11px;
-  text-align: center;
-}
-
-.watchface-creator-preview {
-  position: relative;
-  width: min(100%, 300px);
-  aspect-ratio: 1;
-  overflow: hidden;
-  border: 9px solid #12161a;
-  border-radius: 50%;
-  background:
-    linear-gradient(135deg, rgba(8, 17, 22, 0.52), rgba(0, 0, 0, 0.24)),
-    var(--creator-background);
-  background-color: #081116;
-  background-position: center;
-  background-size: cover;
-  box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.08),
-    0 18px 36px rgba(0, 0, 0, 0.42);
-}
-
-.watchface-preview-day,
-.watchface-preview-metric,
-.watchface-preview-time {
-  position: absolute;
-  z-index: 1;
-}
-
-.watchface-preview-day {
-  top: 30%;
-  left: 62%;
-  color: rgba(255, 255, 255, 0.8);
-  font-size: clamp(9px, 2.5vw, 12px);
-  font-weight: 700;
-}
-
-.watchface-preview-time {
-  top: 39%;
-  left: 56%;
-  color: #f8fbfa;
-  font-size: clamp(30px, 10vw, 52px);
-  letter-spacing: -0.09em;
-  line-height: 0.9;
-}
-
-.watchface-preview-metric {
-  right: 14%;
-  bottom: 18%;
-  color: rgba(255, 255, 255, 0.77);
-  font-size: clamp(8px, 2.3vw, 11px);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-.watchface-preview-safe-zone {
-  position: absolute;
-  z-index: 0;
-  top: 19%;
-  right: 12%;
-  width: 37%;
-  height: 60%;
-  border: 1px dashed rgba(255, 255, 255, 0.17);
-  border-radius: 12px;
-}
-
-.watchface-creator-canvas {
-  display: none;
-}
-
 .watchfaces-share-grid {
   display: grid;
   grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
@@ -4786,13 +4641,6 @@ td span {
     grid-column: 1 / -1;
   }
 
-  .watchface-creator-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .watchface-creator-preview-shell {
-    position: static;
-  }
 }
 
 @media (max-width: 620px) {
@@ -21940,29 +21788,6 @@ body.is-backgrounded .training-backup-progress-track.is-indeterminate span {
 }
 
 /* ── Watchface editor (3-pane, Figma-style) ─────────────────────────── */
-.watchface-mode-switch {
-  display: inline-flex;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  background: var(--glass-bg);
-}
-.watchface-mode-switch button {
-  padding: 6px 14px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.watchface-mode-switch button.is-active {
-  background: var(--accent);
-  color: #04140f;
-}
-
 .watchface-editor {
   display: flex;
   flex-direction: column;

@@ -870,7 +870,8 @@ export async function createCorosWatchfaceArchive(
     replacements,
     background,
     sprites,
-    configOverrides
+    configOverrides,
+    input.minWatchFaceVersion
   );
   const outputDirectory = path.join(app.getPath("userData"), "watchface-archives");
   await fs.promises.mkdir(outputDirectory, { recursive: true });
@@ -1834,12 +1835,31 @@ function buildCreatorAssetReplacements(background: Electron.NativeImage): Map<st
   return replacements;
 }
 
+/**
+ * Raises info.json's `o_wf_ver` to at least `minimum`, editing the manifest as
+ * raw text. The file must never be JSON round-tripped: `o_template_id` exceeds
+ * Number.MAX_SAFE_INTEGER (see extractDecimalProperty), so parsing would
+ * corrupt it. Only the numeric `o_wf_ver` value is touched.
+ */
+function raiseWatchFaceVersion(rawInfo: string, minimum: number): string {
+  const match = rawInfo.match(/"o_wf_ver"\s*:\s*(\d+)/);
+  if (match) {
+    if (Number(match[1]) >= minimum) {
+      return rawInfo;
+    }
+    return rawInfo.replace(/"o_wf_ver"\s*:\s*\d+/, `"o_wf_ver":${minimum}`);
+  }
+  // Templates without the key predate weather support; declare it up front.
+  return rawInfo.replace(/^(\s*\{)/, `$1"o_wf_ver":${minimum},`);
+}
+
 async function rewriteTemplateArchive(
   sourcePath: string,
   replacements: Map<string, Buffer>,
   background: Electron.NativeImage,
   spriteReplacements: Map<string, DecodedSpriteReplacement> = new Map(),
-  configOverrides: Map<string, Record<string, string>> = new Map()
+  configOverrides: Map<string, Record<string, string>> = new Map(),
+  minWatchFaceVersion?: number
 ): Promise<Buffer> {
   const directory = await openTemplateArchive(sourcePath);
   const sourceFiles = directory.files.filter((entry) => entry.type === "File");
@@ -1894,6 +1914,21 @@ async function rewriteTemplateArchive(
 
   const entries = await Promise.all(
     sourceFiles.map(async (entry) => {
+      if (
+        minWatchFaceVersion !== undefined &&
+        entry.path.replace(/^\.\//, "") === "info.json"
+      ) {
+        return {
+          name: entry.path,
+          data: Buffer.from(
+            raiseWatchFaceVersion(
+              (await entry.buffer()).toString("utf8"),
+              minWatchFaceVersion
+            ),
+            "utf8"
+          )
+        };
+      }
       const backgroundData = replacements.get(entry.path);
       if (backgroundData) {
         return { name: entry.path, data: backgroundData };

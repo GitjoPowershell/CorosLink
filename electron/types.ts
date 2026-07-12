@@ -201,6 +201,14 @@ export interface CorosWatchfaceCreatorInput {
    * the original file are rejected rather than appended.
    */
   configOverrides?: CorosWatchfaceConfigOverride[];
+  /**
+   * Raises info.json's `o_wf_ver` to at least this value. The phone-app
+   * compiler only bakes weather/temperature elements into the on-watch binary
+   * when the template declares a high-enough watchface version (official
+   * weather-bearing faces ship `o_wf_ver:4`); a stock DIY face at version 0
+   * renders those elements in the preview but drops them on the watch.
+   */
+  minWatchFaceVersion?: number;
 }
 
 export interface CorosWatchfaceConfigOverride {

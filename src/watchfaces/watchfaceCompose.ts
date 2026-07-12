@@ -57,7 +57,16 @@ export interface DesignDetails {
 export interface WatchfaceComposeResult {
   assetReplacements: CorosWatchfaceAssetReplacement[];
   configOverrides: CorosWatchfaceConfigOverride[];
+  /**
+   * Minimum info.json `o_wf_ver` this design needs the exported archive to
+   * declare. Weather and temperature are only compiled onto the watch when the
+   * template announces a high-enough version, so those features raise it to 4.
+   */
+  minWatchFaceVersion?: number;
 }
+
+/** Official weather-bearing COROS faces ship this watchface version. */
+const WEATHER_WATCHFACE_VERSION = 4;
 
 function metricStylesOf(design: CorosWatchfaceDesignState): WatchfaceMetricStyles {
   return (design.metricStyles ?? {}) as WatchfaceMetricStyles;
@@ -71,7 +80,7 @@ function dateStylesOf(design: CorosWatchfaceDesignState): WatchfaceDateStyles {
   return (design.dateStyles ?? {}) as WatchfaceDateStyles;
 }
 
-/** Preview options mirror WatchfaceCreator so both views render identically. */
+/** Preview options keep Studio rendering aligned with archive composition. */
 export function toStudioOptions(
   design: CorosWatchfaceDesignState
 ): WatchfaceStudioOptions {
@@ -94,7 +103,7 @@ export function toStudioOptions(
 }
 
 /**
- * Reproduces WatchfaceCreator's derived-details chain as a pure function:
+ * Builds the Studio's derived-details chain as a pure function:
  * metric toggles → component styles → layout offsets.
  */
 export function deriveDesignDetails(
@@ -145,7 +154,7 @@ function layoutIsActive(design: CorosWatchfaceDesignState): boolean {
 
 /**
  * Builds the exact sprite-replacement and config-override sets that
- * WatchfaceCreator sends to createCorosWatchfaceArchive, driven purely by a
+ * Studio sends to createCorosWatchfaceArchive, driven purely by a
  * design state so the new editor produces byte-identical archives.
  */
 export async function composeWatchfaceReplacements(
@@ -282,5 +291,14 @@ export async function composeWatchfaceReplacements(
     )
   );
 
-  return { assetReplacements, configOverrides };
+  const requiresWeatherVersion =
+    Boolean(weatherStyle?.enabled) || controlTemperatureActive;
+
+  return {
+    assetReplacements,
+    configOverrides,
+    ...(requiresWeatherVersion
+      ? { minWatchFaceVersion: WEATHER_WATCHFACE_VERSION }
+      : {})
+  };
 }

@@ -24,6 +24,9 @@ import {
   type WatchfaceTimePartId
 } from "./watchfaceStudio";
 import { getWeatherCapability } from "./weatherAssets";
+import { rotatedCenterBounds } from "./watchfaceEditorGeometry";
+
+export { editorLayerAtPoint } from "./watchfaceEditorGeometry";
 
 /**
  * The editor treats the watchface as a stack of layers. Unlike a freeform
@@ -361,15 +364,17 @@ export function deriveEditorLayers(
   }
 
   for (const sprite of design.designSprites ?? []) {
-    // Sprites are drawn centered on (x, y); match the guided creator's
-    // rotation-aware bounding box so the selection outline hugs the image.
+    // Sprites are drawn centered on (x, y); use a rotation-aware bounding box
+    // so the selection outline hugs the image.
     const width = sprite.width * sprite.scale;
     const height = sprite.height * sprite.scale;
-    const radians = (sprite.rotation * Math.PI) / 180;
-    const rotatedWidth =
-      Math.abs(width * Math.cos(radians)) + Math.abs(height * Math.sin(radians));
-    const rotatedHeight =
-      Math.abs(width * Math.sin(radians)) + Math.abs(height * Math.cos(radians));
+    const bounds = rotatedCenterBounds(
+      sprite.x,
+      sprite.y,
+      width,
+      height,
+      sprite.rotation
+    );
     layers.push({
       id: `sprite:${sprite.id}`,
       kind: "customSprite",
@@ -381,10 +386,7 @@ export function deriveEditorLayers(
       bounds: {
         id: `sprite:${sprite.id}`,
         label: "Imported sprite",
-        x0: sprite.x - rotatedWidth / 2,
-        y0: sprite.y - rotatedHeight / 2,
-        x1: sprite.x + rotatedWidth / 2,
-        y1: sprite.y + rotatedHeight / 2
+        ...bounds
       },
       capabilities: { position: true, color: false, scale: true, font: false }
     });
@@ -404,35 +406,4 @@ export function deriveEditorLayers(
   });
 
   return layers;
-}
-
-/**
- * The top-most selectable layer at a point, honoring paint order (background
- * last). Metric/sprite layers without bounds are skipped.
- */
-export function editorLayerAtPoint(
-  layers: EditorLayer[],
-  x: number,
-  y: number
-): EditorLayer | null {
-  const hits = layers.filter(
-    (layer) =>
-      layer.kind !== "background" &&
-      layer.visible &&
-      layer.bounds !== null &&
-      x >= layer.bounds.x0 &&
-      x <= layer.bounds.x1 &&
-      y >= layer.bounds.y0 &&
-      y <= layer.bounds.y1
-  );
-  if (hits.length === 0) {
-    return layers.find((layer) => layer.kind === "background") ?? null;
-  }
-  // Smallest box wins so a metric inside the complication slot stays grabbable.
-  return hits.sort((left, right) => boxArea(left) - boxArea(right))[0]!;
-}
-
-function boxArea(layer: EditorLayer): number {
-  const box = layer.bounds!;
-  return (box.x1 - box.x0) * (box.y1 - box.y0);
 }

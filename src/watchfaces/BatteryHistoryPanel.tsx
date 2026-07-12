@@ -1,14 +1,25 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { BatteryCharging, ChevronDown, Loader2, RefreshCw } from "lucide-react";
+import {
+  BatteryCharging,
+  ChevronDown,
+  KeyRound,
+  Loader2,
+  RefreshCw
+} from "lucide-react";
 import type { CorosBatteryReport, CorosPairedDevice } from "../../electron/types";
 import type { CorosLinkApi } from "../coroslink-api";
 
 interface BatteryHistoryPanelProps {
   api: CorosLinkApi;
   disabled: boolean;
+  authenticated?: boolean;
 }
 
-export function BatteryHistoryPanel({ api, disabled }: BatteryHistoryPanelProps) {
+export function BatteryHistoryPanel({
+  api,
+  disabled,
+  authenticated = true
+}: BatteryHistoryPanelProps) {
   const [devices, setDevices] = useState<CorosPairedDevice[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
   const [report, setReport] = useState<CorosBatteryReport | null>(null);
@@ -39,8 +50,16 @@ export function BatteryHistoryPanel({ api, disabled }: BatteryHistoryPanelProps)
   }, [api]);
 
   useEffect(() => {
-    void loadDevices();
-  }, [loadDevices]);
+    if (authenticated) {
+      void loadDevices();
+    } else {
+      setDevices([]);
+      setSelectedDeviceId("");
+      setReport(null);
+      setDeviceError(null);
+      setError(null);
+    }
+  }, [authenticated, loadDevices]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -72,39 +91,55 @@ export function BatteryHistoryPanel({ api, disabled }: BatteryHistoryPanelProps)
         connected account. Select a watch; CorosLink retrieves its internal
         identifiers automatically and never displays or saves them here.
       </p>
-      <form className="watchfaces-battery-form" onSubmit={handleSubmit}>
-        <label className="field">
-          Paired watch
-          <select
-            value={selectedDeviceId}
-            disabled={disabled || loadingDevices || devices.length === 0}
-            onChange={(event) => {
-              setSelectedDeviceId(event.target.value);
-              setReport(null);
-            }}
+      {!authenticated ? (
+        <div className="watchfaces-battery-local-state">
+          <KeyRound size={18} aria-hidden="true" />
+          <p>Connect COROS from the Hub header to view account battery data.</p>
+        </div>
+      ) : (
+        <form className="watchfaces-battery-form" onSubmit={handleSubmit}>
+          <label className="field">
+            Paired watch
+            <select
+              value={selectedDeviceId}
+              disabled={disabled || loadingDevices || devices.length === 0}
+              onChange={(event) => {
+                setSelectedDeviceId(event.target.value);
+                setReport(null);
+              }}
+            >
+              {devices.length === 0 ? <option value="">No paired watch found</option> : null}
+              {devices.map((device) => (
+                <option key={device.deviceId} value={device.deviceId}>
+                  {device.firmwareType} · {shortUuid(device.uuid)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={disabled || loadingDevices}
+            onClick={() => void loadDevices()}
           >
-            {devices.length === 0 ? <option value="">No paired watch found</option> : null}
-            {devices.map((device) => (
-              <option key={device.deviceId} value={device.deviceId}>
-                {device.firmwareType} · {shortUuid(device.uuid)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button className="secondary-button" type="button" disabled={disabled || loadingDevices} onClick={() => void loadDevices()}>
-          {loadingDevices ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
-          Refresh watches
-        </button>
-        <button className="primary-button" type="submit" disabled={disabled || loading || !selectedDevice}>
-          {loading ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
-          Load battery history
-        </button>
-      </form>
+            {loadingDevices ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+            Refresh watches
+          </button>
+          <button
+            className="primary-button"
+            type="submit"
+            disabled={disabled || loading || !selectedDevice}
+          >
+            {loading ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+            Load battery history
+          </button>
+        </form>
+      )}
 
-      {deviceError ? <p className="watchfaces-battery-error">{deviceError}</p> : null}
-      {error ? <p className="watchfaces-battery-error">{error}</p> : null}
+      {authenticated && deviceError ? <p className="watchfaces-battery-error">{deviceError}</p> : null}
+      {authenticated && error ? <p className="watchfaces-battery-error">{error}</p> : null}
 
-      {report ? (
+      {authenticated && report ? (
         <div className="watchfaces-battery-results">
           <div className="watchfaces-battery-summary">
             <strong>{days.length} daily record{days.length === 1 ? "" : "s"}</strong>

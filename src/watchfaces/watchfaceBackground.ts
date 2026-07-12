@@ -66,7 +66,7 @@ function hexToRgba(hex: string, alpha: number): string {
 }
 
 /**
- * Paints the watchface background exactly as WatchfaceCreator does — base
+ * Paints the watch-face background for both preview and export: base
  * color, artwork, shade gradient, imported sprites, and static separators —
  * and returns the 800×800 PNG data URL used as the archive background.
  */
