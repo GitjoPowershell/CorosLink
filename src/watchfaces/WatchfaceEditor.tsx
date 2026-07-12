@@ -57,6 +57,7 @@ import {
   createBackgroundElement
 } from "./watchfaceBackgroundElements";
 import {
+  computeLayoutGroupBounds,
   computeLayoutOffsetLimits,
   drawStudioPreview,
   getAmPmCapability,
@@ -104,7 +105,6 @@ function normalizeEditorDesign(
     metricStyles: {
       ...design.metricStyles,
       temperature: {
-        color: design.digitColor,
         scale: 1
       }
     }
@@ -126,7 +126,7 @@ export function WatchfaceEditor({
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const assetCacheRef = useRef(new Map<string, CorosWatchfaceTemplateAsset>());
   const dragRef = useRef<{
-    kind: "layout" | "bgElement" | "sprite" | "staticSeparator" | "ampm" | "weather";
+    kind: "layout" | "bgElement" | "sprite" | "staticSeparator" | "ampm" | "weather" | "selectorIcon";
     targetId: string;
     startX: number;
     startY: number;
@@ -231,17 +231,87 @@ export function WatchfaceEditor({
     [previewDetails]
   );
   const previewWidth = previewResolution?.width ?? 800;
+  const watchCoordinateResolution = useMemo(
+    () => details?.resolutions.reduce((smallest, resolution) =>
+      resolution.width < smallest.width ? resolution : smallest
+    ) ?? null,
+    [details]
+  );
+  const watchCoordinateWidth = watchCoordinateResolution?.width ?? previewWidth;
+  const watchCoordinateHeight = watchCoordinateResolution?.height ?? previewWidth;
+  const watchCoordinateScale = previewWidth > 0
+    ? watchCoordinateWidth / previewWidth
+    : 1;
+  const toWatchCoordinate = (value: number) =>
+    Math.round(value * watchCoordinateScale);
+  const fromWatchCoordinate = (value: number) =>
+    value / watchCoordinateScale;
   const layoutLimits = useMemo(() => {
     const base = designDetails
       ? pickPreviewResolution(designDetails.styledMetricDetails)
       : null;
     return base ? computeLayoutOffsetLimits(base) : {};
   }, [designDetails]);
+  const baseLayoutBounds = useMemo(() => {
+    const base = designDetails
+      ? pickPreviewResolution(designDetails.styledMetricDetails)
+      : null;
+    return base ? computeLayoutGroupBounds(base) : [];
+  }, [designDetails]);
   const layers = useMemo(
     () => (details ? deriveEditorLayers(details, design) : []),
     [details, design]
   );
   const selectedLayer = layers.find((layer) => layer.id === selectedId) ?? null;
+  const selectorIconTarget = useMemo(() => {
+    if (!previewDetails || !previewResolution) {
+      return null;
+    }
+    const available = getAvailableComplications(previewDetails);
+    const complication = available.find(
+      (item) => item.id === design.previewComplication
+    ) ?? available[0];
+    if (!complication) {
+      return null;
+    }
+    const config = previewResolution.config;
+    const originKey = Object.keys(config).find((key) =>
+      /^rect_control\d+_pos$/.test(key)
+    );
+    const origin = parseConfigPos(originKey ? config[originKey] : undefined);
+    const position = parseConfigPos(
+      config[`control_${complication.controlPrefix}_icon_pos`]
+    );
+    if (!origin || !position) {
+      return null;
+    }
+    const iconValue = config[`control_${complication.controlPrefix}_icon`]
+      ?.replace(/\\/g, "/");
+    const icon = iconValue
+      ? previewResolution.icons.find(
+          (candidate) =>
+            candidate.path === `${previewResolution.directory}/${iconValue}`
+        )
+      : null;
+    const stateFolderName = config[
+      `control_${complication.controlPrefix}_icon_dir`
+    ]?.replace(/\\/g, "/");
+    const state = stateFolderName
+      ? previewResolution.spriteFolders.find(
+          (folder) =>
+            folder.kind === "state" && folder.folder === stateFolderName
+        )?.files[0]
+      : null;
+    const width = icon?.width ?? state?.width ?? Math.round(previewWidth * 0.05);
+    const height = icon?.height ?? state?.height ?? Math.round(previewWidth * 0.04);
+    return {
+      complicationId: complication.id,
+      x0: origin.x + position.x,
+      y0: origin.y + position.y,
+      x1: origin.x + position.x + width,
+      y1: origin.y + position.y + height
+    };
+  }, [design.previewComplication, previewDetails, previewResolution, previewWidth]);
   const backgroundElements = design.backgroundElements ?? [];
   const selectedElementId = selectedId.startsWith("bgel:")
     ? selectedId.slice("bgel:".length)
@@ -384,8 +454,19 @@ export function WatchfaceEditor({
         (layer.bounds.y1 - layer.bounds.y0) * scale
       );
     }
+    if (selectorIconTarget && selectedId === "complication") {
+      context.strokeStyle = "rgba(255, 206, 84, 0.98)";
+      context.lineWidth = 2;
+      context.setLineDash([]);
+      context.strokeRect(
+        selectorIconTarget.x0 * scale,
+        selectorIconTarget.y0 * scale,
+        (selectorIconTarget.x1 - selectorIconTarget.x0) * scale,
+        (selectorIconTarget.y1 - selectorIconTarget.y0) * scale
+      );
+    }
     context.setLineDash([]);
-  }, [layers, selectedId, previewWidth, backgroundElements]);
+  }, [layers, selectedId, previewWidth, backgroundElements, selectorIconTarget]);
 
   const toResolutionPoint = useCallback(
     (event: { clientX: number; clientY: number }) => {
@@ -408,6 +489,29 @@ export function WatchfaceEditor({
       return;
     }
     const toBg = BACKGROUND_SPACE / previewWidth;
+
+    if (
+      selectorIconTarget &&
+      point.x >= selectorIconTarget.x0 &&
+      point.x <= selectorIconTarget.x1 &&
+      point.y >= selectorIconTarget.y0 &&
+      point.y <= selectorIconTarget.y1
+    ) {
+      const iconOffset = design.controlIconOffsets?.[
+        selectorIconTarget.complicationId
+      ] ?? { dx: 0, dy: 0 };
+      setSelectedId("complication");
+      dragRef.current = {
+        kind: "selectorIcon",
+        targetId: selectorIconTarget.complicationId,
+        startX: point.x,
+        startY: point.y,
+        baseX: iconOffset.dx,
+        baseY: iconOffset.dy
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
 
     // When working on the background, clicks target the freeform shapes that
     // sit above it; otherwise the live firmware elements take priority.
@@ -594,6 +698,18 @@ export function WatchfaceEditor({
       });
       return;
     }
+    if (drag.kind === "selectorIcon") {
+      const dx = Math.round(drag.baseX + point.x - drag.startX);
+      const dy = Math.round(drag.baseY + point.y - drag.startY);
+      setDesign((current) => ({
+        ...current,
+        controlIconOffsets: {
+          ...(current.controlIconOffsets ?? {}),
+          [drag.targetId]: { dx, dy }
+        }
+      }));
+      return;
+    }
     const limits = layoutLimits[drag.targetId];
     const fallbackLimit = Math.max(
       previewResolution?.width ?? 800,
@@ -633,7 +749,6 @@ export function WatchfaceEditor({
       const metricStyles = { ...prev.metricStyles };
       if (metricId === "temperature" && visible && !metricStyles.temperature) {
         metricStyles.temperature = {
-          color: prev.digitColor,
           scale: 1
         };
       }
@@ -1417,6 +1532,25 @@ export function WatchfaceEditor({
       ? parseConfigPos(sourceResolution?.config[iconPositionKey])
       : null;
     const iconOffset = design.controlIconOffsets?.[selected] ?? { dx: 0, dy: 0 };
+    const controlOriginKey = sourceResolution
+      ? Object.keys(sourceResolution.config).find((key) =>
+          /^rect_control\d+_pos$/.test(key)
+        )
+      : undefined;
+    const controlOrigin = parseConfigPos(
+      controlOriginKey ? sourceResolution?.config[controlOriginKey] : undefined
+    ) ?? { x: 0, y: 0 };
+    const controlOffset = design.layoutOffsets?.complication ?? { dx: 0, dy: 0 };
+    const iconScreenPosition = baseIconPosition
+      ? {
+          x: toWatchCoordinate(
+            controlOrigin.x + controlOffset.dx + baseIconPosition.x + iconOffset.dx
+          ),
+          y: toWatchCoordinate(
+            controlOrigin.y + controlOffset.dy + baseIconPosition.y + iconOffset.dy
+          )
+        }
+      : null;
     const setIconOffset = (dx: number, dy: number) => {
       setDesign((current) => ({
         ...current,
@@ -1441,7 +1575,6 @@ export function WatchfaceEditor({
                   ? {
                       ...current.metricStyles,
                       temperature: current.metricStyles?.temperature ?? {
-                        color: current.digitColor,
                         scale: 1
                       }
                     }
@@ -1505,16 +1638,19 @@ export function WatchfaceEditor({
         ) : null}
         {baseIconPosition ? (
           <div className="watchface-inspector-position">
-            <span>Selector icon position</span>
+            <span>Selector icon screen position</span>
             <div className="watchface-position-inputs">
               <label>
                 X
                 <input
                   type="number"
-                  value={baseIconPosition.x + iconOffset.dx}
+                  min="0"
+                  max={watchCoordinateWidth}
+                  value={iconScreenPosition?.x ?? 0}
                   onChange={(event) =>
                     setIconOffset(
-                      (Number(event.target.value) || 0) - baseIconPosition.x,
+                      fromWatchCoordinate(Number(event.target.value) || 0) -
+                        controlOrigin.x - controlOffset.dx - baseIconPosition.x,
                       iconOffset.dy
                     )
                   }
@@ -1524,11 +1660,14 @@ export function WatchfaceEditor({
                 Y
                 <input
                   type="number"
-                  value={baseIconPosition.y + iconOffset.dy}
+                  min="0"
+                  max={watchCoordinateHeight}
+                  value={iconScreenPosition?.y ?? 0}
                   onChange={(event) =>
                     setIconOffset(
                       iconOffset.dx,
-                      (Number(event.target.value) || 0) - baseIconPosition.y
+                      fromWatchCoordinate(Number(event.target.value) || 0) -
+                        controlOrigin.y - controlOffset.dy - baseIconPosition.y
                     )
                   }
                 />
@@ -1536,10 +1675,10 @@ export function WatchfaceEditor({
             </div>
             <span>Fine tune · 1 px</span>
             <div className="watchface-nudge-pad">
-              <button type="button" onClick={() => setIconOffset(iconOffset.dx, iconOffset.dy - 1)} aria-label="Nudge selector icon up">↑</button>
-              <button type="button" onClick={() => setIconOffset(iconOffset.dx - 1, iconOffset.dy)} aria-label="Nudge selector icon left">←</button>
-              <button type="button" onClick={() => setIconOffset(iconOffset.dx + 1, iconOffset.dy)} aria-label="Nudge selector icon right">→</button>
-              <button type="button" onClick={() => setIconOffset(iconOffset.dx, iconOffset.dy + 1)} aria-label="Nudge selector icon down">↓</button>
+              <button type="button" onClick={() => setIconOffset(iconOffset.dx, iconOffset.dy - fromWatchCoordinate(1))} aria-label="Nudge selector icon up">↑</button>
+              <button type="button" onClick={() => setIconOffset(iconOffset.dx - fromWatchCoordinate(1), iconOffset.dy)} aria-label="Nudge selector icon left">←</button>
+              <button type="button" onClick={() => setIconOffset(iconOffset.dx + fromWatchCoordinate(1), iconOffset.dy)} aria-label="Nudge selector icon right">→</button>
+              <button type="button" onClick={() => setIconOffset(iconOffset.dx, iconOffset.dy + fromWatchCoordinate(1))} aria-label="Nudge selector icon down">↓</button>
               <button type="button" className="watchface-nudge-reset" onClick={() => setIconOffset(0, 0)}>Reset</button>
             </div>
             <p className="watchface-studio-summary">
@@ -1592,6 +1731,9 @@ export function WatchfaceEditor({
     }
     const offset = design.layoutOffsets?.[layer.layoutGroupId] ?? { dx: 0, dy: 0 };
     const limits = layoutLimits[layer.layoutGroupId];
+    const baseBounds = baseLayoutBounds.find(
+      (bounds) => bounds.id === layer.layoutGroupId
+    );
     const fallbackLimit = Math.max(
       previewResolution?.width ?? 800,
       previewResolution?.height ?? 800
@@ -1631,26 +1773,38 @@ export function WatchfaceEditor({
     };
     return (
       <div className="watchface-inspector-position">
-        <span>Exact offset</span>
+        <span>Watch screen position</span>
         <div className="watchface-position-inputs">
           <label>
             X
             <input
               type="number"
-              min={limits?.minDx ?? -fallbackLimit}
-              max={limits?.maxDx ?? fallbackLimit}
-              value={offset.dx}
-              onChange={(e) => setOffset(Number(e.target.value) || 0, offset.dy)}
+              min="0"
+              max={watchCoordinateWidth}
+              value={toWatchCoordinate((baseBounds?.x0 ?? 0) + offset.dx)}
+              onChange={(e) =>
+                setOffset(
+                  fromWatchCoordinate(Number(e.target.value) || 0) -
+                    (baseBounds?.x0 ?? 0),
+                  offset.dy
+                )
+              }
             />
           </label>
           <label>
             Y
             <input
               type="number"
-              min={limits?.minDy ?? -fallbackLimit}
-              max={limits?.maxDy ?? fallbackLimit}
-              value={offset.dy}
-              onChange={(e) => setOffset(offset.dx, Number(e.target.value) || 0)}
+              min="0"
+              max={watchCoordinateHeight}
+              value={toWatchCoordinate((baseBounds?.y0 ?? 0) + offset.dy)}
+              onChange={(e) =>
+                setOffset(
+                  offset.dx,
+                  fromWatchCoordinate(Number(e.target.value) || 0) -
+                    (baseBounds?.y0 ?? 0)
+                )
+              }
             />
           </label>
         </div>
@@ -1665,10 +1819,10 @@ export function WatchfaceEditor({
         </div>
         <span>Fine tune · 1 px</span>
         <div className="watchface-nudge-pad">
-          <button type="button" onClick={() => setOffset(offset.dx, offset.dy - 1)} aria-label="Nudge up">↑</button>
-          <button type="button" onClick={() => setOffset(offset.dx - 1, offset.dy)} aria-label="Nudge left">←</button>
-          <button type="button" onClick={() => setOffset(offset.dx + 1, offset.dy)} aria-label="Nudge right">→</button>
-          <button type="button" onClick={() => setOffset(offset.dx, offset.dy + 1)} aria-label="Nudge down">↓</button>
+          <button type="button" onClick={() => setOffset(offset.dx, offset.dy - fromWatchCoordinate(1))} aria-label="Nudge up">↑</button>
+          <button type="button" onClick={() => setOffset(offset.dx - fromWatchCoordinate(1), offset.dy)} aria-label="Nudge left">←</button>
+          <button type="button" onClick={() => setOffset(offset.dx + fromWatchCoordinate(1), offset.dy)} aria-label="Nudge right">→</button>
+          <button type="button" onClick={() => setOffset(offset.dx, offset.dy + fromWatchCoordinate(1))} aria-label="Nudge down">↓</button>
           {(offset.dx !== 0 || offset.dy !== 0) ? (
             <button type="button" className="watchface-nudge-reset" onClick={() => setOffset(0, 0)}>Reset</button>
           ) : null}
@@ -1770,16 +1924,16 @@ export function WatchfaceEditor({
           </span>
         </label>
         <div className="watchface-inspector-position">
-          <span>Exact position</span>
+          <span>Watch screen position</span>
           <div className="watchface-position-inputs">
             <label>
               X
               <input
                 type="number"
                 min="0"
-                max={faceWidth}
-                value={separator.x}
-                onChange={(e) => setPosition(Number(e.target.value) || 0, separator.y)}
+                max={watchCoordinateWidth}
+                value={toWatchCoordinate(separator.x)}
+                onChange={(e) => setPosition(fromWatchCoordinate(Number(e.target.value) || 0), separator.y)}
               />
             </label>
             <label>
@@ -1787,9 +1941,9 @@ export function WatchfaceEditor({
               <input
                 type="number"
                 min="0"
-                max={faceHeight}
-                value={separator.y}
-                onChange={(e) => setPosition(separator.x, Number(e.target.value) || 0)}
+                max={watchCoordinateHeight}
+                value={toWatchCoordinate(separator.y)}
+                onChange={(e) => setPosition(separator.x, fromWatchCoordinate(Number(e.target.value) || 0))}
               />
             </label>
           </div>
@@ -1804,10 +1958,10 @@ export function WatchfaceEditor({
           </div>
           <span>Fine tune · 1 px</span>
           <div className="watchface-nudge-pad">
-            <button type="button" onClick={() => setPosition(separator.x, separator.y - 1)} aria-label="Nudge up">↑</button>
-            <button type="button" onClick={() => setPosition(separator.x - 1, separator.y)} aria-label="Nudge left">←</button>
-            <button type="button" onClick={() => setPosition(separator.x + 1, separator.y)} aria-label="Nudge right">→</button>
-            <button type="button" onClick={() => setPosition(separator.x, separator.y + 1)} aria-label="Nudge down">↓</button>
+            <button type="button" onClick={() => setPosition(separator.x, separator.y - fromWatchCoordinate(1))} aria-label="Nudge up">↑</button>
+            <button type="button" onClick={() => setPosition(separator.x - fromWatchCoordinate(1), separator.y)} aria-label="Nudge left">←</button>
+            <button type="button" onClick={() => setPosition(separator.x + fromWatchCoordinate(1), separator.y)} aria-label="Nudge right">→</button>
+            <button type="button" onClick={() => setPosition(separator.x, separator.y + fromWatchCoordinate(1))} aria-label="Nudge down">↓</button>
           </div>
         </div>
         <p className="watchface-studio-summary">
@@ -1914,17 +2068,17 @@ export function WatchfaceEditor({
           />
         </label>
         <div className="watchface-inspector-position">
-          <span>Exact position</span>
+          <span>Watch screen position</span>
           <div className="watchface-position-inputs">
             <label>
               X
               <input
                 type="number"
                 min="0"
-                max={faceWidth}
-                value={indicator.x}
+                max={watchCoordinateWidth}
+                value={toWatchCoordinate(indicator.x)}
                 onChange={(event) =>
-                  setPosition(Number(event.target.value) || 0, indicator.y)
+                  setPosition(fromWatchCoordinate(Number(event.target.value) || 0), indicator.y)
                 }
               />
             </label>
@@ -1933,10 +2087,10 @@ export function WatchfaceEditor({
               <input
                 type="number"
                 min="0"
-                max={faceHeight}
-                value={indicator.y}
+                max={watchCoordinateHeight}
+                value={toWatchCoordinate(indicator.y)}
                 onChange={(event) =>
-                  setPosition(indicator.x, Number(event.target.value) || 0)
+                  setPosition(indicator.x, fromWatchCoordinate(Number(event.target.value) || 0))
                 }
               />
             </label>
@@ -1952,10 +2106,10 @@ export function WatchfaceEditor({
           </div>
           <span>Fine tune · 1 px</span>
           <div className="watchface-nudge-pad">
-            <button type="button" onClick={() => setPosition(indicator.x, indicator.y - 1)} aria-label="Nudge up">↑</button>
-            <button type="button" onClick={() => setPosition(indicator.x - 1, indicator.y)} aria-label="Nudge left">←</button>
-            <button type="button" onClick={() => setPosition(indicator.x + 1, indicator.y)} aria-label="Nudge right">→</button>
-            <button type="button" onClick={() => setPosition(indicator.x, indicator.y + 1)} aria-label="Nudge down">↓</button>
+            <button type="button" onClick={() => setPosition(indicator.x, indicator.y - fromWatchCoordinate(1))} aria-label="Nudge up">↑</button>
+            <button type="button" onClick={() => setPosition(indicator.x - fromWatchCoordinate(1), indicator.y)} aria-label="Nudge left">←</button>
+            <button type="button" onClick={() => setPosition(indicator.x + fromWatchCoordinate(1), indicator.y)} aria-label="Nudge right">→</button>
+            <button type="button" onClick={() => setPosition(indicator.x, indicator.y + fromWatchCoordinate(1))} aria-label="Nudge down">↓</button>
           </div>
         </div>
         <p className="watchface-studio-summary">
@@ -1973,10 +2127,6 @@ export function WatchfaceEditor({
     }
     const faceWidth = previewResolution?.width ?? previewWidth;
     const faceHeight = previewResolution?.height ?? previewWidth;
-    const offset = {
-      dx: Math.round(indicator.x - capability.defaultPos.x),
-      dy: Math.round(indicator.y - capability.defaultPos.y)
-    };
     const boundsForScale = (scale: number) => ({
       width: capability.size.width * scale,
       height: capability.size.height * scale
@@ -2038,18 +2188,18 @@ export function WatchfaceEditor({
           />
         </label>
         <div className="watchface-inspector-position">
-          <span>Exact offset</span>
+          <span>Watch screen position</span>
           <div className="watchface-position-inputs">
             <label>
               X
               <input
                 type="number"
-                min={-capability.defaultPos.x}
-                max={Math.max(0, faceWidth - boundsForScale(indicator.scale).width) - capability.defaultPos.x}
-                value={offset.dx}
+                min="0"
+                max={watchCoordinateWidth}
+                value={toWatchCoordinate(indicator.x)}
                 onChange={(event) =>
                   setPosition(
-                    capability.defaultPos.x + (Number(event.target.value) || 0),
+                    fromWatchCoordinate(Number(event.target.value) || 0),
                     indicator.y
                   )
                 }
@@ -2059,13 +2209,13 @@ export function WatchfaceEditor({
               Y
               <input
                 type="number"
-                min={-capability.defaultPos.y}
-                max={Math.max(0, faceHeight - boundsForScale(indicator.scale).height) - capability.defaultPos.y}
-                value={offset.dy}
+                min="0"
+                max={watchCoordinateHeight}
+                value={toWatchCoordinate(indicator.y)}
                 onChange={(event) =>
                   setPosition(
                     indicator.x,
-                    capability.defaultPos.y + (Number(event.target.value) || 0)
+                    fromWatchCoordinate(Number(event.target.value) || 0)
                   )
                 }
               />
@@ -2082,19 +2232,10 @@ export function WatchfaceEditor({
           </div>
           <span>Fine tune · 1 px</span>
           <div className="watchface-nudge-pad">
-            <button type="button" onClick={() => setPosition(indicator.x, indicator.y - 1)} aria-label="Nudge up">↑</button>
-            <button type="button" onClick={() => setPosition(indicator.x - 1, indicator.y)} aria-label="Nudge left">←</button>
-            <button type="button" onClick={() => setPosition(indicator.x + 1, indicator.y)} aria-label="Nudge right">→</button>
-            <button type="button" onClick={() => setPosition(indicator.x, indicator.y + 1)} aria-label="Nudge down">↓</button>
-            {(offset.dx !== 0 || offset.dy !== 0) ? (
-              <button
-                type="button"
-                className="watchface-nudge-reset"
-                onClick={() => setPosition(capability.defaultPos.x, capability.defaultPos.y)}
-              >
-                Reset
-              </button>
-            ) : null}
+            <button type="button" onClick={() => setPosition(indicator.x, indicator.y - fromWatchCoordinate(1))} aria-label="Nudge up">↑</button>
+            <button type="button" onClick={() => setPosition(indicator.x - fromWatchCoordinate(1), indicator.y)} aria-label="Nudge left">←</button>
+            <button type="button" onClick={() => setPosition(indicator.x + fromWatchCoordinate(1), indicator.y)} aria-label="Nudge right">→</button>
+            <button type="button" onClick={() => setPosition(indicator.x, indicator.y + fromWatchCoordinate(1))} aria-label="Nudge down">↓</button>
           </div>
         </div>
         <p className="watchface-studio-summary">

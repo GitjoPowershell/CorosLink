@@ -15,14 +15,20 @@ import {
   buildTimeTrackingOverrides,
   computeLayoutGroupBounds,
   computeLayoutOffsetLimits,
+  corosWeekdayIndex,
   getAvailableComplications,
   getAmPmCapability,
   getFixedMetricCapabilities,
   inferStaticSeparators,
   mergeAssetReplacements,
   mergeConfigOverrides,
+  rebaseNegativeControlChildren,
   scaleConfigRectValue
 } from "../src/watchfaces/watchfaceStudio.ts";
+
+assert.equal(corosWeekdayIndex(0), 6);
+assert.equal(corosWeekdayIndex(1), 0);
+assert.equal(corosWeekdayIndex(6), 5);
 
 function digitFiles(width, height, directory, folder) {
   return Array.from({ length: 10 }, (_, digit) => ({
@@ -257,18 +263,42 @@ assert.deepEqual(
     control_battery_icon_pos: "{15,14}"
   }
 );
-const archivedControlIconOverrides = buildControlIconPositionOverrides(
+
+// Non-negative children pass through untouched.
+assert.equal(
+  rebaseNegativeControlChildren(iconPositionDetails, controlIconOverrides),
+  controlIconOverrides
+);
+
+// A drag that pushes a child above/left of the selector origin rebases the
+// origin instead: absolute positions are identical, children stay >= 0.
+const negativeIconOverrides = buildControlIconPositionOverrides(
   iconPositionDetails,
-  { steps: { dx: 10, dy: -6 } },
-  true
+  { steps: { dx: -30, dy: -20 } }
+);
+const rebasedOverrides = rebaseNegativeControlChildren(
+  iconPositionDetails,
+  negativeIconOverrides
 );
 assert.deepEqual(
-  archivedControlIconOverrides.find((entry) => entry.path.includes("800x800"))?.values,
-  { control_step_icon_pos: "{34,22}" }
+  rebasedOverrides.find((entry) => entry.path.includes("800x800"))?.values,
+  {
+    rect_control1_pos: "{94,196}",
+    control_step_icon_pos: "{0,0}",
+    control_battery_icon_pos: "{38,24}",
+    control_hr_rect: "{166,4,294,68,hcenter|vcenter}",
+    control_step_rect: "{86,4,310,68,hcenter|vcenter}"
+  }
 );
 assert.deepEqual(
-  archivedControlIconOverrides.find((entry) => entry.path.includes("416x416"))?.values,
-  { control_step_icon_pos: "{17,11}" }
+  rebasedOverrides.find((entry) => entry.path.includes("416x416"))?.values,
+  {
+    rect_control1_pos: "{48,102}",
+    control_step_icon_pos: "{0,0}",
+    control_battery_icon_pos: "{21,12}",
+    control_hr_rect: "{87,2,154,35,hcenter|vcenter}",
+    control_step_rect: "{46,2,162,35,hcenter|vcenter}"
+  }
 );
 
 const metricOverrides = buildMetricOverrides(details, {
@@ -291,7 +321,7 @@ assert.equal(
   "{65,600,315,685,hcenter|vcenter}"
 );
 assert.equal(full.values.temperature_font, "13x19");
-assert.equal(full.values.temperature_font_color, "0xFFFFFF");
+assert.equal(full.values.temperature_font_color, undefined);
 assert.equal(full.values.control_temperature_font, undefined);
 assert.equal(full.values.control_temperature_rect, undefined);
 assert.equal(full.values.kcal_rect, "");
@@ -391,8 +421,11 @@ assert.equal(
   fullMetricStyle?.values.temperature_rect,
   "{34,590,347,696,hcenter|vcenter}"
 );
+// With TEMPERATURE_FONT_COMPAT enabled, the fixed temperature block reuses
+// the template's digit folder and takes a firmware tint instead of
+// pre-colored `cl_ftemp` sprites.
 assert.equal(fullMetricStyle?.values.temperature_font_color, "0x33AA55");
-assert.equal(fullMetricStyle?.values.temperature_font, "cl_ftemp");
+assert.equal(fullMetricStyle?.values.temperature_font, "13x19");
 assert.equal(fullMetricStyle?.values.control_temperature_font, undefined);
 assert.equal(fullMetricStyle?.values.control_temperature_font_color, undefined);
 const metricStyleWithoutColor = buildMetricStyleOverrides(

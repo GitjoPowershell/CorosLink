@@ -674,7 +674,12 @@ export const WATCHFACE_DATE_PARTS: WatchfaceDatePartDefinition[] = [
   }
 ];
 
-const WEEKDAY_LABELS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+const WEEKDAY_LABELS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+
+/** COROS weekday sprites are indexed Monday=0 through Sunday=6. */
+export function corosWeekdayIndex(jsDay: number): number {
+  return (jsDay + 6) % 7;
+}
 
 interface WatchfaceTimePartDefinition {
   id: WatchfaceTimePartId;
@@ -804,6 +809,18 @@ const METRIC_STUDIO_FOLDERS: Record<WatchfaceMetricId, string> = {
   temperature: "cl_ftemp"
 };
 
+/**
+ * Temporary experiment (July 2026): on-watch, every element backed by the
+ * template's own files renders, while weather and temperature — the features
+ * that depend on folders we create (`weather`, `cl_ftemp`) — do not. To test
+ * whether the COROS pipeline drops newly created folders, this flag makes the
+ * fixed temperature block reuse the template's existing digit folder with a
+ * firmware color tint instead of generated `cl_ftemp` sprites. Trade-off
+ * while enabled: the temperature size slider only scales the rect, not the
+ * digits, and custom fonts don't apply to this block.
+ */
+export const TEMPERATURE_FONT_COMPAT = true;
+
 function timeStudioFolder(
   part: WatchfaceTimePartId,
   slot: "high" | "low"
@@ -918,9 +935,7 @@ export function getAvailableComplications(
 /** Moves selectable-control icons independently from their value rectangles. */
 export function buildControlIconPositionOverrides(
   details: CorosWatchfaceTemplateDetails,
-  offsets: Record<string, { dx: number; dy: number }>,
-  /** COROS firmware applies selector-child Y deltas opposite to the editor canvas. */
-  invertVerticalOffset = false
+  offsets: Record<string, { dx: number; dy: number }>
 ): CorosWatchfaceConfigOverride[] {
   const base = pickPreviewResolution(details);
   if (!base) {
@@ -939,13 +954,78 @@ export function buildControlIconPositionOverrides(
       if (!position) {
         continue;
       }
-      const dy = offset.dy * scale * (invertVerticalOffset ? -1 : 1);
-      values[key] = `{${Math.round(position.x + offset.dx * scale)},${Math.round(position.y + dy)}}`;
+      values[key] = `{${Math.round(position.x + offset.dx * scale)},${Math.round(position.y + offset.dy * scale)}}`;
     }
     return Object.keys(values).length > 0
       ? [{ path: `${resolution.directory}/config.txt`, values }]
       : [];
   });
+}
+
+/**
+ * Every `control_*` child coordinate is relative to `rect_controlN_pos`, and
+ * stock templates keep all children non-negative. Icon drags can push a child
+ * above/left of the origin, and negative child values are unproven on-watch
+ * (COROS's pipeline may clamp or drop them). This rewrites the merged export
+ * overrides so the origin absorbs any negative child offsets: absolute screen
+ * positions are unchanged, but every child coordinate stays non-negative.
+ */
+export function rebaseNegativeControlChildren(
+  details: CorosWatchfaceTemplateDetails,
+  overrides: CorosWatchfaceConfigOverride[]
+): CorosWatchfaceConfigOverride[] {
+  const rebaseGroups: CorosWatchfaceConfigOverride[] = [];
+  for (const resolution of details.resolutions) {
+    const path = `${resolution.directory}/config.txt`;
+    const overridden = overrides.find((entry) => entry.path === path)?.values;
+    const effective: Record<string, string> = {
+      ...resolution.config,
+      ...(overridden ?? {})
+    };
+    const originKey = Object.keys(effective).find((key) =>
+      /^rect_control\d+_pos$/.test(key)
+    );
+    const origin = parseConfigPos(originKey ? effective[originKey] : undefined);
+    if (!originKey || !origin) {
+      continue;
+    }
+    const childKeys = Object.keys(effective).filter(
+      (key) =>
+        /^control_[a-z0-9_]+_(icon_pos|rect)$/.test(key) &&
+        offsetConfigValue(effective[key]!, 0, 0) !== null
+    );
+    let minX = 0;
+    let minY = 0;
+    for (const key of childKeys) {
+      const pos = parseConfigPos(effective[key]);
+      const rect = pos ? null : parseConfigRect(effective[key]);
+      const x = pos?.x ?? rect?.x0;
+      const y = pos?.y ?? rect?.y0;
+      if (x === undefined || y === undefined) {
+        continue;
+      }
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+    }
+    if (minX === 0 && minY === 0) {
+      continue;
+    }
+    const shiftX = -minX;
+    const shiftY = -minY;
+    const values: Record<string, string> = {
+      [originKey]: `{${origin.x - shiftX},${origin.y - shiftY}}`
+    };
+    for (const key of childKeys) {
+      const shifted = offsetConfigValue(effective[key]!, shiftX, shiftY);
+      if (shifted !== null) {
+        values[key] = shifted;
+      }
+    }
+    rebaseGroups.push({ path, values });
+  }
+  return rebaseGroups.length > 0
+    ? mergeConfigOverrides(overrides, rebaseGroups)
+    : overrides;
 }
 
 function controlTemperatureFontFolder(
@@ -1122,10 +1202,12 @@ export function buildMetricOverrides(
         parseConfigRect(resolution.config.temperature_rect)
       ) {
         const font = metricFontFolder(resolution, metric);
-        values.temperature_font =
-          resolution.config.temperature_font || font?.folder || "13x19";
-        values.temperature_font_color =
-          resolution.config.temperature_font_color || "0xFFFFFF";
+        // Compat mode ignores a configured folder that may not exist in the
+        // template (e.g. a baked `cl_ftemp` from an earlier round trip);
+        // metricFontFolder only returns folders present in the archive.
+        values.temperature_font = TEMPERATURE_FONT_COMPAT
+          ? font?.folder ?? "13x19"
+          : resolution.config.temperature_font || font?.folder || "13x19";
         if (
           !resolution.config.temperature_negative_sign_icon &&
           Object.prototype.hasOwnProperty.call(
@@ -1162,7 +1244,6 @@ export function buildMetricOverrides(
         values[metric.rectKey] = `{${Math.round(reference.x0 * ratio)},${Math.round(reference.y0 * ratio)},${Math.round(reference.x1 * ratio)},${Math.round(reference.y1 * ratio)},hcenter|vcenter}`;
         const font = metricFontFolder(resolution, metric);
         values.temperature_font = font?.folder ?? "13x19";
-        values.temperature_font_color = "0xFFFFFF";
         if (Object.prototype.hasOwnProperty.call(resolution.config, "temperature_negative_sign_icon")) {
           values.temperature_negative_sign_icon = "icon\\negative.png";
         }
@@ -1237,10 +1318,19 @@ export function buildMetricStyleOverrides(
       }
       values[metric.rectKey] = rect;
       if (useStudioFolders && metric.fontKey) {
-        values[metric.fontKey] = METRIC_STUDIO_FOLDERS[metric.id];
+        values[metric.fontKey] =
+          metric.id === "temperature" && TEMPERATURE_FONT_COMPAT
+            ? metricFontFolder(resolution, metric)!.folder
+            : METRIC_STUDIO_FOLDERS[metric.id];
       }
       if (metric.fontColorKey && style.color) {
-        values[metric.fontColorKey] = configHexColor(style.color);
+        // Generated digit sprites are pre-colored, so a firmware tint would
+        // recolor them twice. In compat mode temperature reuses the
+        // template's own digits and needs the tint.
+        values[metric.fontColorKey] =
+          metric.id === "temperature" && !TEMPERATURE_FONT_COMPAT
+            ? ""
+            : configHexColor(style.color);
       }
     }
     if (Object.keys(values).length > 0) {
@@ -1270,6 +1360,9 @@ export async function buildMetricSpriteReplacements(
   }[] = [];
   for (const resolution of details.resolutions) {
     for (const metric of WATCHFACE_FIXED_METRICS) {
+      if (metric.id === "temperature" && TEMPERATURE_FONT_COMPAT) {
+        continue;
+      }
       const style = styles[metric.id];
       const rect = parseConfigRect(resolution.config[metric.rectKey]);
       const source = style ? metricFontFolder(resolution, metric) : null;
@@ -2165,6 +2258,7 @@ export async function drawStudioPreview(
 
   const config = resolution.config;
   const now = new Date();
+  const weekdayIndex = corosWeekdayIndex(now.getDay());
   const hour = String(now.getHours()).padStart(2, "0");
   const minute = String(now.getMinutes()).padStart(2, "0");
   const second = String(now.getSeconds()).padStart(2, "0");
@@ -2249,7 +2343,7 @@ export async function drawStudioPreview(
     config["english_date_week_font"]
   );
   const weekRect = parseConfigRect(config["english_date_week_rect"]);
-  const weekFile = weekSource?.files[now.getDay()] ?? weekSource?.files[0];
+  const weekFile = weekSource?.files[weekdayIndex] ?? weekSource?.files[0];
   const weekColor =
     options.dateStyles?.weekday?.color ??
     options.layerColors?.weekday ??
@@ -2637,7 +2731,7 @@ export async function drawStudioPreview(
     if (weekFontFamily) {
       image = await loadStudioImage(
         renderDigitSprite(
-          WEEKDAY_LABELS[now.getDay()] ?? "DAY",
+          WEEKDAY_LABELS[weekdayIndex] ?? "DAY",
           weekWidth,
           weekHeight,
           weekFontFamily,

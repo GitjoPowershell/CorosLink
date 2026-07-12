@@ -30,6 +30,7 @@ import {
   getAvailableComplications,
   mergeAssetReplacements,
   mergeConfigOverrides,
+  rebaseNegativeControlChildren,
   type WatchfaceAssetLoader,
   type WatchfaceDateStyles,
   type WatchfaceMetricStyles,
@@ -254,32 +255,31 @@ export async function composeWatchfaceReplacements(
     timeTrackingOverrides
   );
 
-  const configOverrides = mergeConfigOverrides(
-    metricOverrides,
-    metricStyleActive ? buildMetricStyleOverrides(metricDetails, metricStyles, true) : [],
-    controlTemperatureActive
-      ? buildControlTemperatureOverrides(
-          metricDetails,
-          controlTemperatureStyle,
-          controlTemperatureRasterActive
-        )
-      : [],
-    timeStyleOverrides,
-    dateStyleActive ? buildDateStyleOverrides(details, dateStyles, true) : [],
-    timeTrackingOverrides,
-    buildLayerColorOverrides(details, design.layerColors ?? {}),
-    buildControlIconPositionOverrides(
-      details,
-      design.controlIconOffsets ?? {},
-      true
-    ),
-    buildStaticSeparatorOverrides(details, design.staticSeparators),
-    ampmSupported ? buildAmPmOverrides(details, ampmStyle!) : [],
-    weatherStyle ? buildWeatherOverrides(details, weatherStyle) : [],
-    layoutIsActive(design)
-      ? buildLayoutOverrides(layoutDetails, design.layoutOffsets ?? {})
-      : [],
-    buildLayerVisibilityOverrides(details, design.layerVisibility ?? {})
+  const configOverrides = rebaseNegativeControlChildren(
+    details,
+    mergeConfigOverrides(
+      metricOverrides,
+      metricStyleActive ? buildMetricStyleOverrides(metricDetails, metricStyles, true) : [],
+      controlTemperatureActive
+        ? buildControlTemperatureOverrides(
+            metricDetails,
+            controlTemperatureStyle,
+            controlTemperatureRasterActive
+          )
+        : [],
+      timeStyleOverrides,
+      dateStyleActive ? buildDateStyleOverrides(details, dateStyles, true) : [],
+      timeTrackingOverrides,
+      buildLayerColorOverrides(details, design.layerColors ?? {}),
+      buildControlIconPositionOverrides(details, design.controlIconOffsets ?? {}),
+      buildStaticSeparatorOverrides(details, design.staticSeparators),
+      ampmSupported ? buildAmPmOverrides(details, ampmStyle!) : [],
+      weatherStyle ? buildWeatherOverrides(details, weatherStyle) : [],
+      layoutIsActive(design)
+        ? buildLayoutOverrides(layoutDetails, design.layoutOffsets ?? {})
+        : [],
+      buildLayerVisibilityOverrides(details, design.layerVisibility ?? {})
+    )
   );
 
   return { assetReplacements, configOverrides };

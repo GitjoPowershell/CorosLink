@@ -1789,7 +1789,7 @@ export function WatchfaceCreator({
                                 ) {
                                   setMetricStyles((current) => ({
                                     ...current,
-                                    temperature: { color: digitColor, scale: 1 }
+                                    temperature: { scale: 1 }
                                   }));
                                 }
                                 if (!enabled) {
@@ -1869,7 +1869,7 @@ export function WatchfaceCreator({
                       if (next === "temperature" && !metricStyles.temperature) {
                         setMetricStyles((current) => ({
                           ...current,
-                          temperature: { color: digitColor, scale: 1 }
+                          temperature: { scale: 1 }
                         }));
                       }
                     }}
