@@ -51,6 +51,7 @@ Your home screen for watch status, library metrics, and quick actions. See every
 - **Watch-aware dashboard** — detects your connected COROS watch and shows model-specific storage capacity
 - **Time-of-day greeting** with a watch hero image and live connection status
 - **Storage ring** showing used space, free space, and total capacity for your model (4 GB or 32 GB)
+- **Visit heatmap globe** — activity visit density on a 3D globe, with street-level heatmap drill-down
 - **Metric tiles** for local library count, tracks on watch, transferred count, and library size
 - **Quick actions** to jump into YouTube browsing, playlist sync, or Spotify sync
 - **Paste-a-link download** with optional auto-transfer to your watch
@@ -114,9 +115,9 @@ Sync your YouTube channel playlists with Google OAuth.
 
 #### YouTube Music
 
-Sync your YouTube Music library by pasting request headers from your browser.
+Sync your YouTube Music library playlists and liked songs.
 
-- **Header-based connect** — copy a `browse` request from DevTools on music.youtube.com (visual guide in-app)
+- **In-app sign-in** — connect from CorosLink with automatic header capture (manual DevTools paste still available as a fallback)
 - **Sync playlists and liked songs** from your library
 - **Queue tracks** to download and transfer to your watch
 - Requires **Python 3.10+** and **`ytmusicapi`** (`python3 -m pip install ytmusicapi`)
@@ -125,8 +126,8 @@ Sync your YouTube Music library by pasting request headers from your browser.
 
 Browse your Apple Music library playlists and queue tracks for download.
 
-- **Header-based connect** — copy an `amp-api` request from DevTools on music.apple.com (visual guide in-app)
-- **Library playlists** load automatically when `media-user-token` is included
+- **In-app sign-in** — connect from CorosLink with automatic `amp-api` header capture (manual DevTools paste still available as a fallback)
+- **Library playlists** load when library access is available from the captured session
 - **Tracks resolve via YouTube search** — Apple Music streams are DRM-protected, so downloads use the same YouTube matching flow as Spotify sync
 
 #### Apple Podcasts
@@ -215,6 +216,12 @@ then claim it through COROS's official share page on iPhone.
 - **Official source-template browser** — query COROS's editable-template
   catalog for the selected watch model, download the source ZIP, validate its
   manifest, and select it as the creator's starter in one step
+- **3-pane watchface editor (beta)** — layer-based editor alongside the creator,
+  with background canvas, local fonts, weather/temperature, and sprite tinting
+- **Battery history & device info** — Bluetooth battery history and device
+  details for a connected watch
+- **Region-aware mobile login** — choose US / EU / CN so watchface publish works
+  for accounts registered in those regions
 - **Archive validation** — checks the ZIP/.dat package has `info.json`, a source
   template ID, DIY version, and a custom-face preview before upload
 - **Separate mobile session** — signs in to the mobile COROS API; only the
@@ -223,10 +230,12 @@ then claim it through COROS's official share page on iPhone.
   while creating the custom template and its time-limited share URL
 - **QR hand-off** — scan the generated official COROS URL on the paired iPhone,
   save the face in COROS, then send it to the watch from the COROS app
+- **Advanced tools** — legacy 614A carrier editor and raw `.bin` watchface
+  installer for supported workflows
 
-This is not direct Bluetooth sideloading and does not bypass the iPhone COROS
-app. The endpoints are undocumented and may change; only upload archives you
-are entitled to use.
+This is not a full bypass of the iPhone COROS app for normal publish hand-off.
+Advanced raw install paths are experimental; endpoints are undocumented and may
+change. Only upload or install archives you are entitled to use.
 
 ---
 
@@ -241,12 +250,36 @@ Log in with your COROS account to view training data, fitness scores, and race p
 - **EvoLab fitness scores** — Aerobic Endurance, Lactate Threshold, Anaerobic Endurance and Capacity
 - **Race predictor** with estimated finish times by distance
 - **Recent activities table** with a detail panel for laps, HR, elevation, and more
+- **Strength activity detail** — set/rep summary and exercise table with resolved exercise names
+- **Sleep & daily health** — sleep score/stages plus steps and calories from COROS data
 - **FIT file export** via signed download URL
 - **Bulk activity backup** — download your entire activity history (FIT, GPX, TCX, KML, or CSV) to a local folder; re-running only fetches new activities
+- **Push activities to COROS** — import from intervals.icu or add manual activities
 
 <p align="center">
   <img src="docs/screenshots/training-hub-2.png" alt="Training Hub" width="900" />
 </p>
+
+---
+
+### Calendar — scheduled workouts and activities
+
+Month and week views for planned workouts and completed activities on one grid.
+
+- **Drag-and-drop reschedule** for future workouts
+- **Add / delete workouts** and week stats
+- **Ask Coach** handoff from a selected day or week
+
+---
+
+### Coach — training chatbot (BETA)
+
+Ask training questions with answers grounded in your COROS data.
+
+- **Providers** — ChatGPT (cloud), Claude Code, or local LLMs (Ollama / LM Studio)
+- **Model selection & extended thinking** where the provider supports them
+- **Workout tools** — draft plans, preview in chat, upload/list/delete COROS workouts with confirmation cards
+- **Chat history** — per-provider conversations persist across restarts
 
 ---
 
@@ -301,15 +334,13 @@ Open the DMG, then drag **CorosLink** into **Applications** when the installer w
 
 #### macOS: “app is damaged” or won’t open
 
-The app is **not** corrupted. macOS blocks unsigned apps downloaded from the internet. Fix it after installing:
+Release DMGs from GitHub are **signed and notarized**. If Gatekeeper still blocks an older or locally built unsigned copy, clear the quarantine flag after installing:
 
 ```sh
 xattr -cr "/Applications/CorosLink.app"
 ```
 
 Then open normally. If that still fails, right-click the app → **Open** → **Open** again.
-
-> Builds are unsigned (no Apple Developer certificate). A future signed release would skip this step.
 
 Windows may show a SmartScreen prompt for unsigned installers — click **More info** → **Run anyway**.
 
@@ -319,9 +350,7 @@ On Linux, download the AppImage, mark it executable (`chmod +x CorosLink-*.AppIm
 
 Packaged builds check **[GitHub Releases](https://github.com/JunAkerBuilds/CorosLink/releases)** for new versions on launch. When an update is available, CorosLink downloads it in the background and shows **Restart to update** in the header. You can also click the version badge to check manually.
 
-> **macOS note:** Auto-update works best with signed builds. Unsigned installs may still need a manual download from GitHub Releases until code signing is set up.
-
-> **First release with in-app updates:** Users on v0.1.7 or earlier must install manually once. After that, updates arrive in-app.
+> **First release with in-app updates:** Users on v0.1.7 or earlier must install manually once. After that, updates arrive in-app. Signed macOS builds (v0.1.16+) support reliable in-app update install.
 
 ### Build from source
 
@@ -493,13 +522,13 @@ Because `better-sqlite3` is native, build Windows installers on Windows or in CI
 1. Prepare the version in `package.json` and `package-lock.json` so they match the tag you are about to create:
 
 ```sh
-npm run release:prepare -- v0.1.5
-git commit -am "chore: release v0.1.5"
-git tag v0.1.5
-git push origin main v0.1.5
+npm run release:prepare -- v0.1.17
+git commit -am "chore: release v0.1.17"
+git tag v0.1.17
+git push origin main v0.1.17
 ```
 
-2. That triggers the [Release installers](.github/workflows/release.yml) workflow. CI syncs the tag into `package.json` before building, then verifies the versions match, so installer names like `CorosLink-0.1.5-arm64.dmg` and `CorosLink-0.1.5-x64.dmg` always follow the git tag. The workflow also uploads `latest-mac.yml`, `latest-linux.yml`, and `latest.yml` plus macOS/Windows blockmaps so packaged apps can auto-update via `electron-updater` (Linux AppImage embeds its blockmap in the file). Each platform build runs `scripts/verify-release-artifacts.mjs` and fails if update metadata is missing.
+2. That triggers the [Release installers](.github/workflows/release.yml) workflow. CI syncs the tag into `package.json` before building, then verifies the versions match, so installer names like `CorosLink-0.1.17-arm64.dmg` and `CorosLink-0.1.17-x64.dmg` always follow the git tag. The workflow also uploads `latest-mac.yml`, `latest-linux.yml`, and `latest.yml` plus macOS/Windows blockmaps so packaged apps can auto-update via `electron-updater` (Linux AppImage embeds its blockmap in the file). Each platform build runs `scripts/verify-release-artifacts.mjs` and fails if update metadata is missing.
 
 You can also run the workflow manually from **Actions → Release installers** (it uses the current `package.json` version when no tag is pushed).
 
@@ -524,7 +553,7 @@ After building, confirm `release/latest-mac.yml` (or `latest.yml` / `latest-linu
 6. Expect: checking → update available → downloading → **Restart to update**.
 7. Click restart; the app should relaunch on the new version.
 
-**Windows** should complete this flow unsigned. **macOS unsigned** may download updates but fail to install on restart until code signing is configured — use manual download as fallback on Mac until then.
+**Windows** and **signed macOS** builds should complete this flow. Locally built unsigned macOS apps may still need a manual download from GitHub Releases.
 
 </details>
 

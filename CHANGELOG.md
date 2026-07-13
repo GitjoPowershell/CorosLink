@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.17] - 2026-07-13
+
+### Added
+
+- **Watch Faces hub** — create and publish custom COROS watchfaces from desktop (theme browser, digit/theme studio, persistent projects, official template catalog) ([#46](https://github.com/JunAkerBuilds/CorosLink/pull/46))
+- **Watchface editor (beta)** — Figma-style 3-pane layer editor with background canvas, local fonts, sprite tinting, weather/temperature controls, and AM/PM customization
+- **Battery history & device info** — Bluetooth battery history and device details in the Watch Faces area
+- **Legacy 614A carrier editor** and **raw watchface installer** for advanced/legacy workflows
+- **Strength activity detail** — summary and exercise table with resolved exercise names in Training Hub ([#44](https://github.com/JunAkerBuilds/CorosLink/pull/44))
+- **Claude Code chat provider** — use Claude Code for Coach, with model selection and extended thinking ([#43](https://github.com/JunAkerBuilds/CorosLink/pull/43))
+- **Apple Podcasts** — search the public catalogue or paste a show link; progressive RSS episode loading and MP3 downloads ([#42](https://github.com/JunAkerBuilds/CorosLink/pull/42))
+- **Visit heatmap globe** — activity visit density on the Overview globe with street-level heatmap drill-down
+
+### Changed
+
+- Watch face hub and studio UI redesign; improved color management and mobile sign-in flow for watchface publish
+- OAuth connection hardening (single-flight guard) used by media provider logins
+
+### Fixed
+
+- Watchface mobile login for EU/CN accounts via region selector ([#45](https://github.com/JunAkerBuilds/CorosLink/pull/45))
+- Personal record type mappings and display order
+- Selector icon export origin rebase for non-negative coordinates
+
 ## [0.1.16] - 2026-07-10
 
 ### Added
@@ -238,6 +262,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - GitHub Actions release workflow and installer build documentation
 
+[0.1.17]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/JunAkerBuilds/CorosLink/compare/v0.1.13...v0.1.14
