@@ -119,7 +119,7 @@ export function WatchfacesView({ api, showDevelopmentTools }: WatchfacesViewProp
   const [maxWatchFaceVersion, setMaxWatchFaceVersion] = useState("5");
   const [themeCatalog, setThemeCatalog] =
     useState<CorosWatchfaceThemeCatalog>("editable");
-  const [watchSerial, setWatchSerial] = useState("");
+  const [watchSerial, setWatchSerial] = useState("x");
   const [modelVersion, setModelVersion] = useState(DEFAULT_MODEL_VERSION);
   const [themes, setThemes] = useState<CorosWatchfaceTheme[]>([]);
   const [themesLoaded, setThemesLoaded] = useState(false);
@@ -333,11 +333,6 @@ export function WatchfacesView({ api, showDevelopmentTools }: WatchfacesViewProp
 
   async function handleLoadThemes(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (themeCatalog !== "editable" && !watchSerial.trim()) {
-      setError("Enter the watch serial number under Advanced filters.");
-      setNotice(null);
-      return;
-    }
     setBusy("themes");
     clearMessages();
     try {
@@ -347,7 +342,7 @@ export function WatchfacesView({ api, showDevelopmentTools }: WatchfacesViewProp
         maxWatchFaceVersion: Number(maxWatchFaceVersion),
         catalog: themeCatalog,
         ...(themeCatalog !== "editable"
-          ? { snCode: watchSerial, modelVersion }
+          ? { snCode: watchSerial.trim() || "x", modelVersion }
           : {})
       });
       setThemes(nextThemes);

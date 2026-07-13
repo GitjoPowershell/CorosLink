@@ -35,6 +35,9 @@ const SETTINGS = {
 
 let client: Client | null = null;
 let cachedTools: CorosMcpTool[] = [];
+/** Single-flight guard: Connect + Training Hub must not fight over :1456. */
+let connectInFlight: Promise<CorosMcpStatus> | null = null;
+let connectInFlightInteractive = false;
 
 // ----- OAuth client provider (persists to settings/safeStorage) -----
 
@@ -43,7 +46,11 @@ class CorosOAuthProvider implements OAuthClientProvider {
   private oauthState = "";
   private loopback: http.Server | null = null;
   private codePromise: Promise<string> | null = null;
+  private settleCode:
+    | ((result: { ok: true; code: string } | { ok: false; error: Error }) => void)
+    | null = null;
   private authWindow: BrowserWindow | undefined;
+  private closingWindow = false;
 
   constructor(
     private readonly parentWindow?: BrowserWindow | null,
@@ -105,23 +112,8 @@ class CorosOAuthProvider implements OAuthClientProvider {
   redirectToAuthorization(authorizationUrl: URL): void {
     // Non-interactive (silent reconnect): never pop a browser window.
     if (!this.interactive) return;
-    this.startLoopback();
-    this.authWindow = new BrowserWindow({
-      width: 520,
-      height: 760,
-      title: "Connect COROS",
-      parent: this.parentWindow ?? undefined,
-      modal: Boolean(this.parentWindow),
-      webPreferences: { nodeIntegration: false, contextIsolation: true }
-    });
-    this.authWindow.on("closed", () => {
-      this.authWindow = undefined;
-    });
-    this.authWindow.webContents.setWindowOpenHandler(({ url }) => {
-      void shell.openExternal(url);
-      return { action: "deny" };
-    });
-    void this.authWindow.loadURL(authorizationUrl.toString());
+    // Bind loopback first; only open the window after :1456 is ours.
+    this.startLoopback(authorizationUrl);
   }
 
   /** Resolves with the authorization code once the loopback callback fires. */
@@ -136,24 +128,128 @@ class CorosOAuthProvider implements OAuthClientProvider {
     return this.codePromise !== null;
   }
 
-  cleanup(): void {
-    try {
-      this.loopback?.close();
-    } catch {
-      // already closing
-    }
+  /**
+   * Tear down the auth window and loopback. Awaits port release so a
+   * subsequent connect can rebind 1456 immediately after cancel/failure.
+   */
+  async cleanup(): Promise<void> {
+    this.finishCode({
+      ok: false,
+      error: new Error("COROS connection cancelled.")
+    });
+
+    const server = this.loopback;
     this.loopback = null;
+    if (server) {
+      await Promise.race([
+        new Promise<void>((resolve) => {
+          server.close(() => resolve());
+          server.on("error", () => resolve());
+        }),
+        new Promise<void>((resolve) => setTimeout(resolve, 1000))
+      ]);
+    }
+
     if (this.authWindow && !this.authWindow.isDestroyed()) {
+      this.closingWindow = true;
       const toClose = this.authWindow;
-      setTimeout(() => {
-        if (!toClose.isDestroyed()) toClose.close();
-      }, 300);
+      // Keep the success/failure page visible briefly, then dismiss.
+      await new Promise<void>((resolve) => {
+        setTimeout(() => {
+          if (!toClose.isDestroyed()) toClose.close();
+          resolve();
+        }, 300);
+      });
     }
   }
 
-  private startLoopback(): void {
-    if (this.loopback) return;
+  private finishCode(
+    result: { ok: true; code: string } | { ok: false; error: Error }
+  ): void {
+    const settle = this.settleCode;
+    if (!settle) return;
+    this.settleCode = null;
+    settle(result);
+  }
+
+  private openAuthWindow(authorizationUrl: URL): void {
+    if (this.authWindow && !this.authWindow.isDestroyed()) return;
+    this.authWindow = new BrowserWindow({
+      width: 520,
+      height: 760,
+      title: "Connect COROS",
+      parent: this.parentWindow ?? undefined,
+      modal: Boolean(this.parentWindow),
+      closable: true,
+      minimizable: false,
+      maximizable: false,
+      autoHideMenuBar: true,
+      webPreferences: { nodeIntegration: false, contextIsolation: true }
+    });
+    this.authWindow.on("closed", () => {
+      this.authWindow = undefined;
+      // Ignore closes we triggered from cleanup after a settled flow.
+      if (this.closingWindow) return;
+      this.finishCode({
+        ok: false,
+        error: new Error("COROS connection window was closed.")
+      });
+    });
+    this.authWindow.webContents.setWindowOpenHandler(({ url }) => {
+      void shell.openExternal(url);
+      return { action: "deny" };
+    });
+    // Keep a close control visible even when the COROS login page hangs.
+    this.authWindow.webContents.on("dom-ready", () => {
+      void this.injectCloseButton();
+    });
+    void this.authWindow.loadURL(authorizationUrl.toString());
+  }
+
+  private async injectCloseButton(): Promise<void> {
+    if (!this.authWindow || this.authWindow.isDestroyed()) return;
+    try {
+      await this.authWindow.webContents.executeJavaScript(
+        `(() => {
+          if (document.getElementById("coroslink-mcp-close")) return;
+          const button = document.createElement("button");
+          button.id = "coroslink-mcp-close";
+          button.type = "button";
+          button.setAttribute("aria-label", "Close");
+          button.title = "Close";
+          button.textContent = "×";
+          button.style.cssText = [
+            "position:fixed",
+            "top:12px",
+            "right:12px",
+            "z-index:2147483647",
+            "width:36px",
+            "height:36px",
+            "border:none",
+            "border-radius:18px",
+            "background:rgba(15,18,24,0.72)",
+            "color:#fff",
+            "font:600 24px/36px system-ui,sans-serif",
+            "cursor:pointer",
+            "box-shadow:0 4px 16px rgba(0,0,0,0.28)"
+          ].join(";");
+          button.addEventListener("click", () => window.close());
+          document.documentElement.appendChild(button);
+        })();`,
+        true
+      );
+    } catch {
+      // Page may block script injection; OS window chrome remains available.
+    }
+  }
+
+  private startLoopback(authorizationUrl: URL): void {
+    if (this.codePromise) return;
     this.codePromise = new Promise<string>((resolve, reject) => {
+      this.settleCode = (result) => {
+        if (result.ok) resolve(result.code);
+        else reject(result.error);
+      };
       const server = http.createServer((request, response) => {
         if (!request.url) return;
         const callbackUrl = new URL(request.url, LOOPBACK_REDIRECT_URI);
@@ -165,30 +261,126 @@ class CorosOAuthProvider implements OAuthClientProvider {
         const error = callbackUrl.searchParams.get("error");
         const code = callbackUrl.searchParams.get("code");
         const returnedState = callbackUrl.searchParams.get("state");
-        response.writeHead(200, { "Content-Type": "text/html" });
+        response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         if (error) {
-          response.end("<p>COROS connection failed. You can close this window.</p>");
-          reject(new Error(error));
+          response.end(corosMcpResultPage("COROS connection failed.", true));
+          this.finishCode({ ok: false, error: new Error(error) });
           return;
         }
         if (returnedState !== this.oauthState || !code) {
-          response.end("<p>COROS connection failed. You can close this window.</p>");
-          reject(new Error("COROS OAuth state mismatch."));
+          response.end(corosMcpResultPage("COROS connection failed.", true));
+          this.finishCode({
+            ok: false,
+            error: new Error("COROS OAuth state mismatch.")
+          });
           return;
         }
-        response.end("<p>COROS connected. You can close this window.</p>");
-        resolve(code);
+        response.end(corosMcpResultPage("COROS connected.", false));
+        this.finishCode({ ok: true, code });
       });
-      server.on("error", reject);
-      server.listen(LOOPBACK_PORT, "127.0.0.1", () => {
-        const address = server.address() as AddressInfo;
-        if (address.port !== LOOPBACK_PORT) {
-          reject(new Error("COROS OAuth callback port did not bind."));
+      server.on("error", (error) => {
+        const detail =
+          error instanceof Error ? error : new Error(String(error));
+        if ((detail as NodeJS.ErrnoException).code === "EADDRINUSE") {
+          this.finishCode({
+            ok: false,
+            error: new Error(
+              "COROS OAuth callback port 1456 is already in use. " +
+                "Close other CorosLink windows, or run: lsof -nP -iTCP:1456 -sTCP:LISTEN"
+            )
+          });
+          return;
         }
+        this.finishCode({ ok: false, error: detail });
       });
       this.loopback = server;
+      server.listen(LOOPBACK_PORT, "127.0.0.1", () => {
+        const address = server.address() as AddressInfo | null;
+        if (!address || address.port !== LOOPBACK_PORT) {
+          this.finishCode({
+            ok: false,
+            error: new Error("COROS OAuth callback port did not bind.")
+          });
+          return;
+        }
+        this.openAuthWindow(authorizationUrl);
+      });
     });
+    // Prevent unhandledRejection if cleanup settles before waitForCode().
+    void this.codePromise.catch(() => undefined);
   }
+}
+
+function corosMcpResultPage(message: string, failed: boolean): string {
+  const tone = failed ? "#b42318" : "#027a48";
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Connect COROS</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font: 15px/1.45 system-ui, -apple-system, sans-serif;
+      background: #0f1218;
+      color: #f4f6f8;
+    }
+    .card {
+      position: relative;
+      width: min(360px, calc(100vw - 32px));
+      padding: 28px 24px 24px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      text-align: center;
+    }
+    .close {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 36px;
+      height: 36px;
+      border: none;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      font: 600 24px/36px system-ui, sans-serif;
+      cursor: pointer;
+    }
+    .close:hover { background: rgba(255,255,255,0.2); }
+    h1 {
+      margin: 8px 0 8px;
+      font-size: 18px;
+      font-weight: 650;
+      color: ${tone};
+    }
+    p { margin: 0 0 18px; color: rgba(244,246,248,0.72); }
+    .action {
+      border: none;
+      border-radius: 999px;
+      padding: 10px 18px;
+      background: #f4f6f8;
+      color: #0f1218;
+      font: 600 13px/1 system-ui, sans-serif;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <button id="coroslink-mcp-close" class="close" type="button" aria-label="Close" title="Close" onclick="window.close()">×</button>
+    <h1>${message}</h1>
+    <p>You can close this window.</p>
+    <button class="action" type="button" onclick="window.close()">Close</button>
+  </div>
+</body>
+</html>`;
 }
 
 // ----- Token persistence (encrypted) -----
@@ -253,6 +445,41 @@ export async function connectCorosMcp(
 ): Promise<CorosMcpStatus> {
   ensureCurrentMcpResource();
 
+  for (;;) {
+    if (client) {
+      return getCorosMcpStatus();
+    }
+
+    if (connectInFlight) {
+      // Join an in-flight connect when it can satisfy us (same or richer auth).
+      if (!interactive || connectInFlightInteractive) {
+        return connectInFlight;
+      }
+      // Silent reconnect is running; wait, then open interactive UI if still needed.
+      try {
+        await connectInFlight;
+      } catch {
+        // Fall through and start an interactive attempt.
+      }
+      continue;
+    }
+
+    connectInFlightInteractive = interactive;
+    const flight = connectCorosMcpOnce(mainWindow, interactive).finally(() => {
+      if (connectInFlight === flight) {
+        connectInFlight = null;
+        connectInFlightInteractive = false;
+      }
+    });
+    connectInFlight = flight;
+    return flight;
+  }
+}
+
+async function connectCorosMcpOnce(
+  mainWindow?: BrowserWindow | null,
+  interactive = true
+): Promise<CorosMcpStatus> {
   if (client) {
     return getCorosMcpStatus();
   }
@@ -300,7 +527,7 @@ export async function connectCorosMcp(
         }
       }
     } finally {
-      authProvider.cleanup();
+      await authProvider.cleanup();
     }
 
     client = mcpClient;

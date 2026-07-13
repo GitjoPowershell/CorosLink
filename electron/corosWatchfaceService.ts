@@ -281,11 +281,11 @@ export async function listCorosWatchfaceThemes(
     input.catalog === "official" || input.catalog === "custom"
       ? input.catalog
       : "editable";
-  const snCode = input.snCode?.trim() ?? "";
+  // Catalog endpoints accept any non-empty snCode; a real serial is not required.
+  const snCode =
+    input.snCode?.trim() ||
+    (catalog === "official" || catalog === "custom" ? "x" : "");
   const modelVersion = input.modelVersion?.trim() ?? "";
-  if ((catalog === "official" || catalog === "custom") && !snCode) {
-    throw new Error("Enter the watch serial number to load official or custom watch faces.");
-  }
   if (snCode.length > 80 || /[\u0000-\u001f\u007f]/.test(snCode)) {
     throw new Error("Enter a valid watch serial number.");
   }

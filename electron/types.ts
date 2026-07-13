@@ -140,7 +140,7 @@ export interface CorosWatchfaceThemeListInput {
   firmwareType: string;
   language?: string;
   maxWatchFaceVersion?: number;
-  /** On-watch and custom-face catalogs require the watch serial (`snCode`). */
+  /** Optional watch serial for on-watch/custom catalogs; any value works (defaults to `"x"`). */
   snCode?: string;
   /** Optional firmware model header captured from the mobile app. */
   modelVersion?: string;

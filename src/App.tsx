@@ -1589,7 +1589,7 @@ export default function App() {
                 storage={storage}
                 watchConnected={Boolean(watchStatus?.connected)}
                 trainingConnected={Boolean(trainingHubStatus?.authenticated)}
-                trainingActivityCount={trainingHubActivities.length}
+                trainingActivities={trainingHubActivities}
                 trainingActivityDetail={trainingHubActivityDetail}
                 busy={busy}
                 onTransfer={handleTransfer}
@@ -2056,7 +2056,7 @@ interface MediaOverviewTabProps {
   } | null;
   watchConnected: boolean;
   trainingConnected: boolean;
-  trainingActivityCount: number;
+  trainingActivities: TrainingHubActivity[];
   trainingActivityDetail: TrainingHubActivityDetail | null;
   busy: string | null;
   onTransfer: (id: string) => void;
@@ -2071,7 +2071,7 @@ function MediaOverviewTab({
   storage,
   watchConnected,
   trainingConnected,
-  trainingActivityCount,
+  trainingActivities,
   trainingActivityDetail,
   busy,
   onTransfer,
@@ -2251,7 +2251,7 @@ function MediaOverviewTab({
 
       <div className="overview-globe-section dashboard-block">
         <ActivityGlobeCard
-          activityCount={trainingActivityCount}
+          activities={trainingActivities}
           connected={trainingConnected}
           detail={trainingActivityDetail}
           loading={busy?.startsWith("training-detail:") ?? false}
