@@ -21,10 +21,6 @@ import {
   ShaderMaterial,
   SRGBColorSpace,
 } from "three";
-import { geoEquirectangular, geoPath, type GeoPermissibleObjects } from "d3-geo";
-import type { GeometryCollection, Topology } from "topojson-specification";
-import { feature } from "topojson-client";
-import landAtlas from "world-atlas/land-110m.json";
 import type { GeoHeatBucket, GlobePoint } from "./activityVisitHeatmap";
 
 interface ActivityGlobeRendererProps {
@@ -60,17 +56,21 @@ interface LandLayerData {
   object: Points<BufferGeometry, ShaderMaterial>;
 }
 
+interface LandGeometryData {
+  positions: Float32Array;
+  strengths: Float32Array;
+}
+
+interface LandGeometryMessage {
+  positions: ArrayBuffer;
+  strengths: ArrayBuffer;
+}
+
 interface RouteLayerData {
   points: GlobePoint[];
 }
 
-type LandTopology = Topology<{ land: GeometryCollection }>;
-
-const topology = landAtlas as unknown as LandTopology;
-const land = feature(topology, topology.objects.land);
-const LAND_DOT_STEP_DEGREES = 1;
 const GLOBE_RADIUS = 100;
-const SURFACE_ALTITUDE = 0.0025;
 const DEFAULT_VIEW: GlobeView = { lat: 18, lng: -20, altitude: 2.2 };
 const SELECTED_VIEW_ALTITUDE = 2.2;
 const FRAMING_VERSION = "full-panel-v3";
@@ -80,128 +80,53 @@ const STREET_VIEW_ALTITUDE = 0.42;
 const IDLE_DELAY_MS = 4_200;
 const IDLE_ROTATION_SPEED = 0.08;
 
-let landDotsCache: Float64Array | null = null;
-let landMaskCache: {
-  width: number;
-  height: number;
-  pixels: Uint8ClampedArray;
-  projection: ReturnType<typeof geoEquirectangular>;
-} | null = null;
+let landGeometryCache: LandGeometryData | null = null;
+let landGeometryPromise: Promise<LandGeometryData> | null = null;
 
-function getLandMask(): NonNullable<typeof landMaskCache> | null {
-  if (landMaskCache) {
-    return landMaskCache;
+function loadLandGeometry(): Promise<LandGeometryData> {
+  if (landGeometryCache) {
+    return Promise.resolve(landGeometryCache);
+  }
+  if (landGeometryPromise) {
+    return landGeometryPromise;
   }
 
-  const width = 1440;
-  const height = 720;
-  const raster = document.createElement("canvas");
-  raster.width = width;
-  raster.height = height;
-  const context = raster.getContext("2d", { willReadFrequently: true });
-  if (!context) {
-    return null;
-  }
-
-  const projection = geoEquirectangular().fitExtent(
-    [
-      [0, 0],
-      [width, height],
-    ],
-    { type: "Sphere" },
-  );
-  context.fillStyle = "#fff";
-  context.beginPath();
-  geoPath(projection, context)(land as GeoPermissibleObjects);
-  context.fill();
-  landMaskCache = {
-    width,
-    height,
-    pixels: context.getImageData(0, 0, width, height).data,
-    projection,
-  };
-  return landMaskCache;
-}
-
-function getLandDots(): Float64Array {
-  if (landDotsCache) {
-    return landDotsCache;
-  }
-
-  const mask = getLandMask();
-  if (!mask) {
-    return new Float64Array(0);
-  }
-
-  const { width, height, pixels, projection } = mask;
-  const dots: number[] = [];
-  for (let row = 0; ; row += 1) {
-    const lat = -84 + row * LAND_DOT_STEP_DEGREES;
-    if (lat > 84) {
-      break;
-    }
-
-    const lonStep =
-      LAND_DOT_STEP_DEGREES /
-      Math.max(Math.cos((lat * Math.PI) / 180), 0.08);
-    for (
-      let lon = -180 + (row % 2) * lonStep * 0.5;
-      lon < 180;
-      lon += lonStep
-    ) {
-      const projected = projection([lon, lat]);
-      if (!projected) {
-        continue;
-      }
-      const x = Math.min(width - 1, Math.max(0, Math.round(projected[0])));
-      const y = Math.min(height - 1, Math.max(0, Math.round(projected[1])));
-      if (pixels[(y * width + x) * 4 + 3]! > 128) {
-        dots.push(lon, lat);
-      }
-    }
-  }
-
-  landDotsCache = Float64Array.from(dots);
-  return landDotsCache;
-}
-
-function coordinateToVector(
-  lat: number,
-  lng: number,
-  radius: number,
-): [number, number, number] {
-  const phi = ((90 - lat) * Math.PI) / 180;
-  const theta = ((90 - lng) * Math.PI) / 180;
-  return [
-    radius * Math.sin(phi) * Math.cos(theta),
-    radius * Math.cos(phi),
-    radius * Math.sin(phi) * Math.sin(theta),
-  ];
-}
-
-function createGeographyPoints(paperTheme: boolean): LandLayerData {
-  const dots = getLandDots();
-  const positions = new Float32Array((dots.length / 2) * 3);
-  const strengths = new Float32Array(dots.length / 2);
-  const radius = GLOBE_RADIUS * (1 + SURFACE_ALTITUDE);
-
-  for (let index = 0; index < dots.length; index += 2) {
-    const pointIndex = index / 2;
-    const [x, y, z] = coordinateToVector(
-      dots[index + 1]!,
-      dots[index]!,
-      radius,
+  landGeometryPromise = new Promise<LandGeometryData>((resolve, reject) => {
+    const worker = new Worker(
+      new URL("./activityGlobeLand.worker.ts", import.meta.url),
+      { type: "module" },
     );
-    positions[pointIndex * 3] = x;
-    positions[pointIndex * 3 + 1] = y;
-    positions[pointIndex * 3 + 2] = z;
-    strengths[pointIndex] =
-      0.72 + (((pointIndex * 2_654_435_761) >>> 0) % 997) / 3_560;
-  }
+    worker.onmessage = (event: MessageEvent<LandGeometryMessage>) => {
+      landGeometryCache = {
+        positions: new Float32Array(event.data.positions),
+        strengths: new Float32Array(event.data.strengths),
+      };
+      worker.terminate();
+      resolve(landGeometryCache);
+    };
+    worker.onerror = (event) => {
+      landGeometryPromise = null;
+      worker.terminate();
+      reject(new Error(event.message || "Unable to prepare globe geography."));
+    };
+  });
+  return landGeometryPromise;
+}
+
+function createGeographyPoints(
+  paperTheme: boolean,
+  landGeometry: LandGeometryData,
+): LandLayerData {
 
   const geometry = new BufferGeometry();
-  geometry.setAttribute("position", new BufferAttribute(positions, 3));
-  geometry.setAttribute("aStrength", new BufferAttribute(strengths, 1));
+  geometry.setAttribute(
+    "position",
+    new BufferAttribute(landGeometry.positions, 3),
+  );
+  geometry.setAttribute(
+    "aStrength",
+    new BufferAttribute(landGeometry.strengths, 1),
+  );
 
   const material = new ShaderMaterial({
     transparent: true,
@@ -302,6 +227,9 @@ const ActivityGlobeRendererComponent = forwardRef<
   const [reducedMotion, setReducedMotion] = useState(
     () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
+  const [landGeometry, setLandGeometry] = useState<LandGeometryData | null>(
+    landGeometryCache,
+  );
 
   const globeMaterial = useMemo(
     () =>
@@ -331,10 +259,16 @@ const ActivityGlobeRendererComponent = forwardRef<
   }, [paperTheme]);
 
   const landLayer = useMemo(
-    () => createGeographyPoints(paperTheme),
-    [paperTheme],
+    () =>
+      landGeometry
+        ? createGeographyPoints(paperTheme, landGeometry)
+        : null,
+    [landGeometry, paperTheme],
   );
-  const landLayerData = useMemo(() => [landLayer], [landLayer]);
+  const landLayerData = useMemo(
+    () => (landLayer ? [landLayer] : []),
+    [landLayer],
+  );
 
   const activityPoints = useMemo<ActivityPoint[]>(() => {
     const maxCount = Math.max(1, ...locations.map((location) => location.count));
@@ -436,6 +370,26 @@ const ActivityGlobeRendererComponent = forwardRef<
     query.addEventListener("change", handleChange);
     return () => query.removeEventListener("change", handleChange);
   }, []);
+
+  useEffect(() => {
+    if (landGeometry) {
+      return;
+    }
+    let active = true;
+    void loadLandGeometry()
+      .then((geometry) => {
+        if (active) {
+          setLandGeometry(geometry);
+        }
+      })
+      .catch(() => {
+        // Geography is decorative. Keep the interactive globe usable if the
+        // worker is unavailable on an older WebView.
+      });
+    return () => {
+      active = false;
+    };
+  }, [landGeometry]);
 
   useEffect(() => {
     if (!ready || !globeRef.current) {
@@ -552,6 +506,9 @@ const ActivityGlobeRendererComponent = forwardRef<
 
   useEffect(
     () => () => {
+      if (!landLayer) {
+        return;
+      }
       landLayer.object.geometry.dispose();
       landLayer.object.material.dispose();
     },

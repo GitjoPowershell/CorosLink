@@ -191,29 +191,56 @@ function mergeVisits(
   base: ActivityVisitPoint[],
   next: ActivityVisitPoint,
 ): ActivityVisitPoint[] {
-  if (base.some((visit) => visit.activityId === next.activityId)) {
+  return mergeVisitBatch(base, [next]);
+}
+
+function mergeVisitBatch(
+  base: ActivityVisitPoint[],
+  incoming: ActivityVisitPoint[],
+): ActivityVisitPoint[] {
+  if (incoming.length === 0) {
     return base;
   }
-  return [...base, next];
+  const activityIds = new Set(base.map((visit) => visit.activityId));
+  const additions = incoming.filter((visit) => {
+    if (activityIds.has(visit.activityId)) {
+      return false;
+    }
+    activityIds.add(visit.activityId);
+    return true;
+  });
+  return additions.length > 0 ? [...base, ...additions] : base;
 }
 
 function mergeRoutes(
   base: ActivityRoutePolyline[],
   next: ActivityRoutePolyline,
 ): ActivityRoutePolyline[] {
-  if (next.points.length < 2) {
+  return mergeRouteBatch(base, [next]);
+}
+
+function mergeRouteBatch(
+  base: ActivityRoutePolyline[],
+  incoming: ActivityRoutePolyline[],
+): ActivityRoutePolyline[] {
+  if (incoming.length === 0) {
     return base;
   }
-  const index = base.findIndex((route) => route.activityId === next.activityId);
-  if (index < 0) {
-    return [...base, next];
+  const routesById = new Map(
+    base.map((route) => [route.activityId, route] as const),
+  );
+  let changed = false;
+  for (const route of incoming) {
+    if (route.points.length < 2) {
+      continue;
+    }
+    const current = routesById.get(route.activityId);
+    if (!current || current.points.length < route.points.length) {
+      routesById.set(route.activityId, route);
+      changed = true;
+    }
   }
-  if (base[index]!.points.length >= next.points.length) {
-    return base;
-  }
-  const updated = [...base];
-  updated[index] = next;
-  return updated;
+  return changed ? Array.from(routesById.values()) : base;
 }
 
 interface GlobeProfile {
@@ -375,13 +402,20 @@ export function ActivityGlobeCard({
     const routesByActivityId = new Set(
       routes.map((route) => route.activityId),
     );
+    const visitIdsByBucket = new Map<string, Set<string>>();
+    for (const visit of visits) {
+      const key = geoHeatBucketKey(visit);
+      const activityIds = visitIdsByBucket.get(key);
+      if (activityIds) {
+        activityIds.add(visit.activityId);
+      } else {
+        visitIdsByBucket.set(key, new Set([visit.activityId]));
+      }
+    }
     return heatBuckets
       .map((bucket) => {
-        const activityIds = new Set(
-          visits
-            .filter((visit) => geoHeatBucketKey(visit) === bucket.key)
-            .map((visit) => visit.activityId),
-        );
+        const activityIds =
+          visitIdsByBucket.get(bucket.key) ?? new Set<string>();
         const placeActivities = [...activityIds]
           .map((activityId) => activitiesById.get(activityId))
           .filter(
@@ -598,6 +632,33 @@ export function ActivityGlobeCard({
     }
 
     const controller = new AbortController();
+    const pendingVisits: ActivityVisitPoint[] = [];
+    const pendingRoutes: ActivityRoutePolyline[] = [];
+    let flushTimer: number | null = null;
+    const flushUpdates = () => {
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+      if (controller.signal.aborted) {
+        pendingVisits.length = 0;
+        pendingRoutes.length = 0;
+        return;
+      }
+      const visitBatch = pendingVisits.splice(0);
+      const routeBatch = pendingRoutes.splice(0);
+      if (visitBatch.length > 0) {
+        setVisits((current) => mergeVisitBatch(current, visitBatch));
+      }
+      if (routeBatch.length > 0) {
+        setRoutes((current) => mergeRouteBatch(current, routeBatch));
+      }
+    };
+    const scheduleFlush = () => {
+      if (flushTimer === null) {
+        flushTimer = window.setTimeout(flushUpdates, 80);
+      }
+    };
     setVisits(getCachedVisitPoints(list));
     setRoutes(getCachedRoutePolylines(list));
     setVisitsLoading(true);
@@ -613,23 +674,29 @@ export function ActivityGlobeCard({
           if (controller.signal.aborted) {
             return;
           }
-          setVisits((current) => mergeVisits(current, visit));
+          pendingVisits.push(visit);
+          scheduleFlush();
         },
         onRoute: (route) => {
           if (controller.signal.aborted) {
             return;
           }
-          setRoutes((current) => mergeRoutes(current, route));
+          pendingRoutes.push(route);
+          scheduleFlush();
         },
       },
     ).finally(() => {
       if (!controller.signal.aborted) {
+        flushUpdates();
         setVisitsLoading(false);
       }
     });
 
     return () => {
       controller.abort();
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer);
+      }
     };
   }, [activityKey, connected]);
 
