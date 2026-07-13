@@ -92,6 +92,7 @@ import {
   saveStartupView,
 } from "./navigation/startupView";
 import { MapsView } from "./maps/MapsView";
+import { WatchfacesView } from "./watchfaces/WatchfacesView";
 import { SettingsView } from "./settings/SettingsView";
 import { CalendarView } from "./calendar/CalendarView";
 import { DataView } from "./data/DataView";
@@ -107,6 +108,7 @@ import {
 } from "./media/libraryUtils";
 import { trackAvatarColor, trackInitial } from "./media/trackAvatar";
 import { useTimeOfDayGreeting } from "./hooks/useTimeOfDayGreeting";
+import { ActivityGlobeCard } from "./overview/ActivityGlobeCard";
 import {
   getWatchPresentation,
   type WatchFeatureIcon,
@@ -127,6 +129,7 @@ const YOUTUBE_HOME_URL = "https://www.youtube.com/";
 const YOUTUBE_DOWNLOAD_CONSOLE_PREFIX = "__COROSLINK_YOUTUBE_DOWNLOAD__";
 const APPLE_MUSIC_SELECTED_PLAYLIST_STORAGE_KEY =
   "coroslink.appleMusic.selectedPlaylistId";
+const IS_DEVELOPMENT_BUILD = import.meta.env.DEV;
 
 let appleMusicSelectedPlaylistIdMemory = "";
 let appleMusicDetailCacheMemory: Record<string, AppleMusicPlaylist> = {};
@@ -142,6 +145,9 @@ export default function App() {
   const [startupView, setStartupView] = useState<View>(readStartupView);
   const [sidebarExpanded, setSidebarExpanded] = useState(
     createInitialSidebarExpanded,
+  );
+  const [showDevelopmentTools, setShowDevelopmentTools] = useState(
+    IS_DEVELOPMENT_BUILD,
   );
   const [sidebarOverlayOpen, setSidebarOverlayOpen] = useState(() => {
     if (typeof window === "undefined") {
@@ -1502,11 +1508,28 @@ export default function App() {
             onInstall={handleInstallUpdate}
             onPreferencesChange={handleUpdatePreferencesChange}
           />
-          <WatchConnectionSmokeControls
-            api={api}
-            onWatchStatusChange={setWatchStatus}
-            onError={setError}
-          />
+          {IS_DEVELOPMENT_BUILD ? (
+            <button
+              className="app-dev-view-toggle"
+              type="button"
+              aria-pressed={showDevelopmentTools}
+              title={
+                showDevelopmentTools
+                  ? "Switch to production view"
+                  : "Switch to developer view"
+              }
+              onClick={() => setShowDevelopmentTools((visible) => !visible)}
+            >
+              {showDevelopmentTools ? "Dev view" : "Prod view"}
+            </button>
+          ) : null}
+          {IS_DEVELOPMENT_BUILD && showDevelopmentTools ? (
+            <WatchConnectionSmokeControls
+              api={api}
+              onWatchStatusChange={setWatchStatus}
+              onError={setError}
+            />
+          ) : null}
           <div
             className={`watch-status-chip${watchStatus?.connected ? " connected" : ""}`}
             title={watchStatus?.rootPath ?? "No watch volume found"}
@@ -1561,25 +1584,18 @@ export default function App() {
           <>
             {activeView === "overview" ? (
               <MediaOverviewTab
-                url={url}
-                setUrl={setUrl}
-                autoTransfer={autoTransfer}
-                setAutoTransfer={setAutoTransfer}
                 downloads={downloads}
                 watchStatus={watchStatus}
                 storage={storage}
                 watchConnected={Boolean(watchStatus?.connected)}
+                trainingConnected={Boolean(trainingHubStatus?.authenticated)}
+                trainingActivityCount={trainingHubActivities.length}
+                trainingActivityDetail={trainingHubActivityDetail}
                 busy={busy}
-                jobs={youtubeJobs}
-                onDownload={handleDownload}
-                onCancelJob={handleCancelYouTubeJob}
-                onClearJob={handleClearYouTubeJob}
-                onClearCompletedJobs={handleClearCompletedYouTubeJobs}
                 onTransfer={handleTransfer}
                 onDeleteDownload={handleDeleteDownload}
                 onOpenLibrary={() => openMediaTab("library")}
-                onOpenYouTube={() => openMediaTab("youtube")}
-                onOpenSpotify={() => openMediaTab("spotify")}
+                onOpenTraining={() => setActiveView("training")}
               />
             ) : null}
             {activeView === "media" ? (
@@ -1678,6 +1694,12 @@ export default function App() {
                 onWatchStatusChange={setWatchStatus}
                 onMessage={setMessage}
                 onError={setError}
+              />
+            ) : null}
+            {activeView === "watchfaces" ? (
+              <WatchfacesView
+                api={api}
+                showDevelopmentTools={showDevelopmentTools}
               />
             ) : null}
             {activeView === "training" ? (
@@ -2023,10 +2045,6 @@ function RecentTrackList({
 }
 
 interface MediaOverviewTabProps {
-  url: string;
-  setUrl: (value: string) => void;
-  autoTransfer: boolean;
-  setAutoTransfer: (value: boolean) => void;
   downloads: LocalTrack[];
   watchStatus: WatchStatus | null;
   storage: {
@@ -2037,42 +2055,31 @@ interface MediaOverviewTabProps {
     capacityLabel: string;
   } | null;
   watchConnected: boolean;
+  trainingConnected: boolean;
+  trainingActivityCount: number;
+  trainingActivityDetail: TrainingHubActivityDetail | null;
   busy: string | null;
-  jobs: DownloadJob[];
-  onDownload: (event: FormEvent<HTMLFormElement>) => void;
-  onCancelJob: (id: string) => void;
-  onClearJob: (id: string) => void;
-  onClearCompletedJobs: () => void;
   onTransfer: (id: string) => void;
   onDeleteDownload: (track: LocalTrack) => void;
   onOpenLibrary: () => void;
-  onOpenYouTube: () => void;
-  onOpenSpotify: () => void;
+  onOpenTraining: () => void;
 }
 
 function MediaOverviewTab({
-  url,
-  setUrl,
-  autoTransfer,
-  setAutoTransfer,
   downloads,
   watchStatus,
   storage,
   watchConnected,
+  trainingConnected,
+  trainingActivityCount,
+  trainingActivityDetail,
   busy,
-  jobs,
-  onDownload,
-  onCancelJob,
-  onClearJob,
-  onClearCompletedJobs,
   onTransfer,
   onDeleteDownload,
   onOpenLibrary,
-  onOpenYouTube,
-  onOpenSpotify,
+  onOpenTraining,
 }: MediaOverviewTabProps) {
   const greeting = useTimeOfDayGreeting();
-  const urlInputRef = useRef<HTMLInputElement>(null);
   const watchTracks = watchStatus?.tracks ?? [];
   const recentDownloads = useMemo(
     () =>
@@ -2212,98 +2219,7 @@ function MediaOverviewTab({
         />
       </div>
 
-      <div className="dashboard-actions dashboard-block">
-        <button
-          type="button"
-          className="dashboard-action"
-          onClick={onOpenYouTube}
-        >
-          <Link size={16} aria-hidden="true" />
-          Browse YouTube
-        </button>
-        <button
-          type="button"
-          className="dashboard-action"
-          onClick={onOpenSpotify}
-        >
-          <ListMusic size={16} aria-hidden="true" />
-          Sync Spotify
-        </button>
-      </div>
-
-      <section className="dashboard-download panel dashboard-block">
-        <form
-          className="download-form download-form-compact"
-          onSubmit={onDownload}
-        >
-          <label className="url-field">
-            <span>Quick download</span>
-            <div className="input-shell">
-              <Link size={18} aria-hidden="true" />
-              <input
-                ref={urlInputRef}
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                placeholder="Paste a YouTube URL or playlist…"
-              />
-            </div>
-          </label>
-
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={autoTransfer}
-              onChange={(event) => setAutoTransfer(event.target.checked)}
-            />
-            Auto-transfer
-          </label>
-
-          <button
-            className="primary-button"
-            type="submit"
-            disabled={!url.trim()}
-          >
-            <Download size={18} aria-hidden="true" />
-            Download MP3
-          </button>
-        </form>
-
-        {jobs.length > 0 ? (
-          <YouTubeJobsList
-            jobs={jobs}
-            onCancelJob={onCancelJob}
-            onClearJob={onClearJob}
-            onClearCompletedJobs={onClearCompletedJobs}
-            emptyMessage="No downloads yet"
-            compact
-          />
-        ) : null}
-      </section>
-
-      {downloads.length === 0 ? (
-        <section className="panel dashboard-onboarding dashboard-block">
-          <h2>Get started</h2>
-          <p>Connect your watch and paste a YouTube link to get started.</p>
-          <div className="dashboard-onboarding-actions">
-            <button
-              type="button"
-              className="primary-button"
-              onClick={() => urlInputRef.current?.focus()}
-            >
-              <Download size={18} aria-hidden="true" />
-              Download MP3
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={onOpenYouTube}
-            >
-              <Link size={18} aria-hidden="true" />
-              Browse YouTube
-            </button>
-          </div>
-        </section>
-      ) : (
+      {downloads.length > 0 ? (
         <section className="panel dashboard-recent dashboard-block">
           <div className="section-heading">
             <div>
@@ -2331,7 +2247,17 @@ function MediaOverviewTab({
             onDeleteDownload={onDeleteDownload}
           />
         </section>
-      )}
+      ) : null}
+
+      <div className="overview-globe-section dashboard-block">
+        <ActivityGlobeCard
+          activityCount={trainingActivityCount}
+          connected={trainingConnected}
+          detail={trainingActivityDetail}
+          loading={busy?.startsWith("training-detail:") ?? false}
+          onOpenTraining={onOpenTraining}
+        />
+      </div>
     </div>
   );
 }
