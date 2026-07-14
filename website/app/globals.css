@@ -175,17 +175,6 @@ body::after {
     -webkit-mask-image: linear-gradient(to left, #000 76%, transparent 100%);
   }
 
-  .hero-supporter-bubbles__wake {
-    position: absolute;
-    right: -10%;
-    bottom: -12%;
-    height: 52%;
-    width: 86%;
-    border-radius: 50%;
-    background: rgba(255, 202, 48, 0.28);
-    filter: blur(70px);
-  }
-
   .hero-supporter-bubble {
     position: absolute;
     bottom: -100px;
@@ -208,7 +197,8 @@ body::after {
       inset 0 -22px 34px rgba(62, 32, 0, 0.42),
       inset 12px 0 30px rgba(255, 224, 72, 0.18),
       0 0 0 1px rgba(225, 157, 10, 0.5),
-      0 20px 58px -20px rgba(255, 203, 45, 0.96);
+      0 0 24px -7px rgba(255, 222, 74, 0.95),
+      0 18px 48px -17px rgba(255, 190, 30, 0.86);
     color: #fff9d9;
     text-align: center;
     will-change: transform, opacity;

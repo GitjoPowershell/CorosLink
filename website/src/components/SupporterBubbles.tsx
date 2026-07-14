@@ -50,7 +50,6 @@ export function SupporterBubbles({
 
   return (
     <div className="hero-supporter-bubbles" aria-label="CorosLink supporters">
-      <div className="hero-supporter-bubbles__wake" aria-hidden="true" />
       {visibleSupporters.map((supporter, index) => {
         const path = BUBBLE_PATHS[index];
 
