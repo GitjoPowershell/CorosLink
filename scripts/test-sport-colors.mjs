@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -44,6 +45,19 @@ assert.equal(
   DEFAULT_SPORT_COLORS.run
 );
 assert.deepEqual(parseSportColors("{malformed"), DEFAULT_SPORT_COLORS);
+
+// The :root --sport-* fallbacks in styles.css mirror DEFAULT_SPORT_COLORS.
+// They're overridden before first paint, but must not silently drift.
+const css = await readFile(path.join(repoRoot, "src", "styles.css"), "utf8");
+for (const [cat, hex] of Object.entries(DEFAULT_SPORT_COLORS)) {
+  const match = css.match(new RegExp(`--sport-${cat}:\\s*(#[0-9a-fA-F]{6})`));
+  assert.ok(match, `styles.css is missing a --sport-${cat} declaration`);
+  assert.equal(
+    match[1].toLowerCase(),
+    hex.toLowerCase(),
+    `--sport-${cat} in styles.css drifted from DEFAULT_SPORT_COLORS`
+  );
+}
 
 // happenDayFromTimestamp: seconds vs ms epochs, invalid → undefined.
 const noonMs = new Date(2026, 6, 14, 12, 0, 0).getTime(); // 2026-07-14 local

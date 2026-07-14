@@ -10,6 +10,8 @@ export const SPORT_COLOR_CATEGORIES: SportColorCategory[] = [
   "other"
 ];
 
+// Source of truth for the default palette. The :root --sport-* fallbacks in
+// src/styles.css mirror these values; test:sport-colors asserts they match.
 export const DEFAULT_SPORT_COLORS: Record<SportColorCategory, string> = {
   strength: "#e5484d",
   trail: "#4c8dff",

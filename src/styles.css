@@ -2,7 +2,9 @@
   color-scheme: dark;
 
   /* Per-sport activity colors. Overridden at runtime from localStorage via
-     applySportColors(); customizable in Settings → Activity colors. */
+     applySportColors(); customizable in Settings → Activity colors.
+     Mirrors DEFAULT_SPORT_COLORS in src/training/sportColors.ts (the source
+     of truth) — test:sport-colors asserts the two stay in sync. */
   --sport-strength: #e5484d;
   --sport-trail: #4c8dff;
   --sport-run: #2fbe91;
@@ -11827,7 +11829,9 @@ td span {
 .training-heatmap-cell {
   /* Base hue for the day; overridden inline per cell with the dominant sport
      color so intensity (level) and sport (hue) compose. Falls back to the
-     original green when a day has load but no matching activity. */
+     original green when a day has load but no matching activity — this is the
+     legacy pre-sport-colors heatmap green, intentionally not a --sport-* value
+     (and intentionally distinct from --sport-run). */
   --cell-color: #2d9a74;
   position: relative;
   width: 100%;
