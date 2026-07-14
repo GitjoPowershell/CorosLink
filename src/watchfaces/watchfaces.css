@@ -2246,8 +2246,15 @@
 }
 
 .watchface-shell .watchface-layer-row {
-  grid-template-columns: 20px minmax(0, 1fr);
+  grid-template-columns: 20px minmax(0, 1fr) auto;
   width: 100%;
+}
+
+.watchface-shell .wf-layer-state {
+  color: var(--accent-strong);
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: 0.03em;
 }
 
 .watchface-shell .wf-pane-loading {
@@ -2537,6 +2544,62 @@
   color: var(--text-primary);
 }
 
+.watchface-shell .wf-preview-mode-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 3px;
+  border: 1px solid var(--wf-border);
+  border-radius: 9px;
+  background: var(--wf-surface);
+  padding: 3px;
+}
+
+.watchface-shell .wf-preview-mode-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0 10px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.watchface-shell .wf-preview-mode-switch button:hover:not(:disabled) {
+  background: var(--wf-surface-hover);
+  color: var(--text-primary);
+}
+
+.watchface-shell .wf-preview-mode-switch button[aria-pressed="true"] {
+  border-color: var(--wf-accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent-strong) 12%, transparent);
+}
+
+.watchface-shell .wf-preview-mode-switch button:disabled {
+  color: color-mix(in srgb, var(--text-secondary) 46%, transparent);
+  cursor: not-allowed;
+}
+
+.watchface-shell .wf-aod-preview-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  margin-left: auto;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 680;
+  white-space: nowrap;
+}
+
 :is(.watchfaces-view, .wf-watchfaces, .watchface-shell) :where(.wf-stage-viewport, .watchface-stage-viewport) {
   display: grid;
   min-width: 0;
@@ -2651,6 +2714,16 @@
   text-align: right;
 }
 
+.watchface-shell .wf-aod-empty-inspector {
+  justify-items: start;
+  color: var(--text-secondary);
+}
+
+.watchface-shell .wf-aod-empty-inspector > strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
 /* Properties */
 
 :is(.watchfaces-view, .wf-watchfaces, .watchface-shell) :where(.wf-inspector-section, .watchface-inspector-group) {
@@ -2675,6 +2748,81 @@
   height: 1px;
   margin: 3px 0;
   background: var(--wf-border);
+}
+
+.watchface-shell .wf-config-asset-preview {
+  display: grid;
+  min-height: 112px;
+  overflow: hidden;
+  border: 1px solid var(--wf-border);
+  border-radius: 10px;
+  background:
+    linear-gradient(45deg, color-mix(in srgb, var(--wf-surface-raised) 88%, transparent) 25%, transparent 25%) 0 0 / 16px 16px,
+    linear-gradient(-45deg, color-mix(in srgb, var(--wf-surface-raised) 88%, transparent) 25%, transparent 25%) 0 8px / 16px 16px,
+    var(--wf-canvas);
+  color: var(--text-secondary);
+  place-items: center;
+  transition: opacity 160ms ease;
+}
+
+.watchface-shell .wf-config-asset-preview.is-disabled {
+  opacity: 0.4;
+}
+
+.watchface-shell .wf-config-asset-preview img {
+  display: block;
+  width: 100%;
+  height: 112px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.watchface-shell .wf-config-asset-meta {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.watchface-shell .wf-config-asset-meta strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.watchface-shell .wf-config-asset-meta span,
+.watchface-shell .wf-config-asset-meta code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watchface-shell .wf-config-asset-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.watchface-shell .wf-config-asset-actions > :only-child {
+  grid-column: 1 / -1;
+}
+
+.watchface-shell .wf-inline-config-asset {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--wf-border);
+  border-radius: 9px;
+  background: var(--wf-surface-raised);
+  padding: 5px 6px 5px 10px;
+}
+
+.watchface-shell .wf-inline-config-asset .secondary-button {
+  min-height: 36px;
+  padding-inline: 10px;
+  white-space: nowrap;
 }
 
 :is(.watchfaces-view, .wf-watchfaces, .watchface-shell) :where(.watchface-color-control, .wf-color-control) {

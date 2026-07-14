@@ -372,6 +372,18 @@ export interface CorosWatchfaceArtwork {
 }
 
 /**
+ * An edit applied to one PNG-valued config entry. The map key is scoped to
+ * either config.txt or AODconfig.txt so two entries may share a source bitmap
+ * without sharing visibility or replacement state.
+ */
+export interface CorosWatchfaceConfigAssetOverride {
+  /** Absent means the template config entry remains enabled. */
+  enabled?: boolean;
+  /** One source PNG is resized independently for every device resolution. */
+  replacement?: CorosWatchfaceArtwork;
+}
+
+/**
  * A user-supplied PNG font atlas. Glyphs are laid out left-to-right,
  * top-to-bottom in equally sized cells; `glyphs` maps those cells to text.
  */
@@ -548,6 +560,8 @@ export interface CorosWatchfaceDesignState {
   layerVisibility?: Record<string, boolean>;
   /** Per-layer colors for firmware components without specialized styles. */
   layerColors?: Record<string, string>;
+  /** Per-config PNG visibility and isolated replacement choices. */
+  configAssetOverrides?: Record<string, CorosWatchfaceConfigAssetOverride>;
   designSprites: CorosWatchfaceDesignSprite[];
   /**
    * Freeform vector shapes baked into the background PNG (800px space).

@@ -12,6 +12,7 @@ import {
   computeLayoutGroupBounds,
   getFixedMetricCapabilities,
   getAmPmCapability,
+  listWatchfaceConfigAssets,
   mergeConfigOverrides,
   pickPreviewResolution,
   WATCHFACE_LAYOUT_GROUPS,
@@ -45,6 +46,7 @@ export type EditorLayerKind =
   | "complication"
   | "metric"
   | "weather"
+  | "configAsset"
   | "customSprite";
 
 /** Which inspector controls a layer supports. */
@@ -73,6 +75,9 @@ export interface EditorLayer {
   spriteId?: string;
   /** Set for editor-authored colon and date-slash layers. */
   staticSeparatorId?: WatchfaceStaticSeparatorId;
+  /** Set for a direct PNG reference parsed from config.txt/AODconfig.txt. */
+  configAssetId?: string;
+  configAssetReplaced?: boolean;
   /** Set for the firmware-swapped AM/PM sprite pair. */
   ampmIndicator?: true;
   /** Set for the dynamic 41-state weather sprite folder. */
@@ -263,8 +268,8 @@ export function deriveEditorLayers(
 
   const staticSeparatorLayers: EditorLayer[] = [];
   for (const [staticSeparatorId, id, label] of [
-    ["colon", "staticColon", "Time colon"],
-    ["dateSlash", "staticDateSlash", "Date slash"]
+    ["colon", "staticColon", "Custom time colon"],
+    ["dateSlash", "staticDateSlash", "Custom date slash"]
   ] as const) {
     const separator = design.staticSeparators?.[staticSeparatorId];
     const visible = Boolean(separator?.enabled);
@@ -360,6 +365,22 @@ export function deriveEditorLayers(
           }
         : null,
       capabilities: { position: true, color: false, scale: true, font: false }
+    });
+  }
+
+  for (const reference of listWatchfaceConfigAssets(details)) {
+    const override = design.configAssetOverrides?.[reference.id];
+    layers.push({
+      id: `configAsset:${reference.id}`,
+      kind: "configAsset",
+      label: reference.label,
+      configAssetId: reference.id,
+      configAssetReplaced: Boolean(override?.replacement),
+      visible: override?.enabled !== false,
+      canHide: true,
+      present: true,
+      bounds: null,
+      capabilities: NO_CAPABILITIES
     });
   }
 

@@ -1159,7 +1159,7 @@ export async function describeCorosWatchfaceTemplate(
       height: Number(dims[2]),
       config,
       aodConfig,
-      ...(await discoverSpriteAssets(files, directoryName, { ...config, ...aodConfig }))
+      ...(await discoverSpriteAssets(files, directoryName, [config, aodConfig]))
     });
   }
 
@@ -1343,11 +1343,24 @@ async function readTemplateConfig(
 async function discoverSpriteAssets(
   files: UnzipperFile[],
   resolutionDirectory: string,
-  config: Record<string, string>
+  configs: Record<string, string>[]
 ): Promise<Pick<CorosWatchfaceResolutionDetails, "spriteFolders" | "icons">> {
   const prefix = `${resolutionDirectory}/`;
   const folderFiles = new Map<string, Map<number, UnzipperFile>>();
   const iconEntries: UnzipperFile[] = [];
+  const iconEntryPaths = new Set<string>();
+  const directlyReferencedPngs = new Set(
+    configs.flatMap((config) => Object.values(config))
+      .map((value) => value.replace(/\\/g, "/").replace(/^\.\//, ""))
+      .filter((value) => /^[^/].*\.png$/i.test(value))
+  );
+
+  const addIconEntry = (entry: UnzipperFile) => {
+    if (!iconEntryPaths.has(entry.path)) {
+      iconEntryPaths.add(entry.path);
+      iconEntries.push(entry);
+    }
+  };
 
   for (const entry of files) {
     if (!entry.path.startsWith(prefix)) {
@@ -1362,14 +1375,17 @@ async function discoverSpriteAssets(
       folderFiles.set(folder, numbered);
       continue;
     }
-    if (/^(a\/)?icon\/[^/]+\.png$/i.test(relative)) {
-      iconEntries.push(entry);
+    if (
+      /^(a\/)?icon\/[^/]+\.png$/i.test(relative) ||
+      directlyReferencedPngs.has(relative)
+    ) {
+      addIconEntry(entry);
     }
   }
 
   const spriteFolders: CorosWatchfaceSpriteFolder[] = [];
   const stateFolders = new Set(
-    Object.entries(config)
+    configs.flatMap((config) => Object.entries(config))
       .filter(([key, value]) => /_icon_dir$/.test(key) && Boolean(value))
       .map(([, value]) => value.replace(/\\/g, "/").replace(/^\.\//, ""))
   );

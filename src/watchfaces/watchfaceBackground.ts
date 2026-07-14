@@ -52,6 +52,7 @@ export function makeDefaultDesign(): CorosWatchfaceDesignState {
     layoutOffsets: {},
     layerVisibility: {},
     layerColors: {},
+    configAssetOverrides: {},
     designSprites: []
   };
 }
@@ -78,8 +79,13 @@ export async function renderDesignBackground(
 
   context.clearRect(0, 0, size, size);
 
-  if (design.artwork) {
-    const image = await loadStudioImage(design.artwork.dataUrl).catch(() => undefined);
+  const backgroundOverride = design.configAssetOverrides?.["config:background_icon"];
+  const backgroundArtwork = backgroundOverride?.enabled === false
+    ? null
+    : backgroundOverride?.replacement ?? design.artwork;
+
+  if (backgroundArtwork) {
+    const image = await loadStudioImage(backgroundArtwork.dataUrl).catch(() => undefined);
     if (image) {
       const scale =
         Math.max(size / image.naturalWidth, size / image.naturalHeight) * design.zoom;

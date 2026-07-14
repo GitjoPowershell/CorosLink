@@ -12,6 +12,8 @@ import {
   buildControlTemperatureOverrides,
   buildControlTemperatureSpriteReplacements,
   buildControlIconPositionOverrides,
+  buildWatchfaceConfigAssetOverrides,
+  buildWatchfaceConfigAssetReplacements,
   buildDateSpriteReplacements,
   buildDateStyleOverrides,
   buildLayerVisibilityOverrides,
@@ -100,6 +102,7 @@ export function toStudioOptions(
     timeStyles: timeStylesOf(design),
     dateStyles: dateStylesOf(design),
     layerColors: design.layerColors ?? {},
+    configAssetOverrides: design.configAssetOverrides ?? {},
     ampmStyle: design.ampmIndicator
   };
 }
@@ -127,7 +130,11 @@ export function deriveDesignDetails(
     buildDateStyleOverrides(metricDetails, dateStylesOf(design)),
     buildLayerColorOverrides(metricDetails, design.layerColors ?? {}),
     buildControlIconPositionOverrides(metricDetails, design.controlIconOffsets ?? {}),
-    buildStaticSeparatorOverrides(details, design.staticSeparators)
+    buildStaticSeparatorOverrides(details, design.staticSeparators),
+    buildWatchfaceConfigAssetOverrides(
+      details,
+      design.configAssetOverrides ?? {}
+    )
   );
   const styledMetricDetails = applyConfigOverridesToDetails(
     metricDetails,
@@ -244,6 +251,10 @@ export async function composeWatchfaceReplacements(
           loadAssets
         )
       : [],
+    await buildWatchfaceConfigAssetReplacements(
+      details,
+      design.configAssetOverrides ?? {}
+    ),
     ampmActive ? await buildAmPmSpriteReplacements(details, ampmStyle!, loadAssets) : [],
     weatherStyle?.enabled
       ? await buildWeatherSpriteReplacements(details, weatherStyle)
@@ -292,7 +303,12 @@ export async function composeWatchfaceReplacements(
       layoutIsActive(design)
         ? buildLayoutOverrides(layoutDetails, design.layoutOffsets ?? {})
         : [],
-      buildLayerVisibilityOverrides(details, design.layerVisibility ?? {})
+      buildLayerVisibilityOverrides(details, design.layerVisibility ?? {}),
+      buildWatchfaceConfigAssetOverrides(
+        details,
+        design.configAssetOverrides ?? {},
+        true
+      )
     )
   );
 

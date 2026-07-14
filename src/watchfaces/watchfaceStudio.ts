@@ -1,6 +1,7 @@
 import type {
   CorosWatchfaceArtwork,
   CorosWatchfaceAssetReplacement,
+  CorosWatchfaceConfigAssetOverride,
   CorosWatchfaceConfigOverride,
   CorosWatchfaceRasterFont,
   CorosWatchfaceResolutionDetails,
@@ -41,6 +42,10 @@ export interface WatchfaceStudioOptions extends WatchfaceTypography {
   dateStyles?: WatchfaceDateStyles;
   /** Colors for firmware layers without a specialized style object. */
   layerColors?: Record<string, string>;
+  /** Preview-time config PNG replacements, keyed by config/aod scope. */
+  configAssetOverrides?: Record<string, CorosWatchfaceConfigAssetOverride>;
+  /** Selects which config tree owns direct PNG references in this preview. */
+  configAssetScope?: WatchfaceConfigAssetScope;
   /** Live AM/PM indicator sprite styling, when the template supports it. */
   ampmStyle?: WatchfaceAmPmStyle;
 }
@@ -86,6 +91,279 @@ export function parseConfigRect(
         y1: Number(match[4])
       }
     : null;
+}
+
+export type WatchfaceConfigAssetScope = "config" | "aod";
+export type WatchfacePreviewMode = "current" | "aod";
+
+export interface WatchfaceConfigAssetReference {
+  id: string;
+  scope: WatchfaceConfigAssetScope;
+  configKey: string;
+  configPath: string;
+  label: string;
+  relativePath: string;
+  archivePath: string;
+  source: CorosWatchfaceSpriteFile | null;
+}
+
+export function watchfaceConfigAssetId(
+  scope: WatchfaceConfigAssetScope,
+  configKey: string
+): string {
+  return `${scope}:${configKey}`;
+}
+
+/** Whether this archive contains a usable always-on configuration. */
+export function hasWatchfaceAod(
+  details: CorosWatchfaceTemplateDetails
+): boolean {
+  return details.resolutions.some(
+    (resolution) => Object.keys(resolution.aodConfig).length > 0
+  );
+}
+
+/**
+ * Presents AODconfig.txt through the normal preview renderer without mutating
+ * the archive description. Resolutions without an AOD layout are omitted from
+ * the device selector while the current-face tree remains unchanged.
+ */
+export function detailsForPreviewMode(
+  details: CorosWatchfaceTemplateDetails,
+  mode: WatchfacePreviewMode
+): CorosWatchfaceTemplateDetails {
+  if (mode === "current") return details;
+  return {
+    ...details,
+    resolutions: details.resolutions
+      .filter((resolution) => Object.keys(resolution.aodConfig).length > 0)
+      .map((resolution) => ({
+        ...resolution,
+        config: { ...resolution.aodConfig }
+      }))
+  };
+}
+
+function configAssetLabel(configKey: string, _scope: WatchfaceConfigAssetScope): string {
+  const special: Record<string, string> = {
+    background_icon: "Background image",
+    watchface_thmb_icon: "Watch face thumbnail",
+    colon_icon: "Time colon",
+    control_colon_icon: "Control value colon",
+    negative_sign_icon: "Negative sign",
+    control_negative_sign_icon: "Control negative sign",
+    arc_cut_icon: "Date separator",
+    time_hour_icon: "Analog hour hand",
+    time_minute_icon: "Analog minute hand",
+    time_second_icon: "Analog second hand",
+    time_center_polygon_icon1: "Analog center overlay (hour + minute)",
+    time_center_polygon_icon2: "Analog center overlay (topmost)"
+  };
+  const base = special[configKey] ?? configKey
+    .replace(/_icon\d*$/i, "")
+    .split("_")
+    .filter(Boolean)
+    .map((word) => word[0]!.toUpperCase() + word.slice(1))
+    .join(" ");
+  return base;
+}
+
+function pngConfigEntries(
+  resolution: CorosWatchfaceResolutionDetails,
+  scope: WatchfaceConfigAssetScope
+): Array<[string, string]> {
+  const config = scope === "aod" ? resolution.aodConfig : resolution.config;
+  return Object.entries(config).filter(([, value]) => /\.png$/i.test(value.trim()));
+}
+
+/** Every direct PNG reference in config.txt and AODconfig.txt. */
+export function listWatchfaceConfigAssets(
+  details: CorosWatchfaceTemplateDetails,
+  resolutionDirectory?: string
+): WatchfaceConfigAssetReference[] {
+  const selectedResolution = resolutionDirectory
+    ? details.resolutions.find((candidate) => candidate.directory === resolutionDirectory)
+    : pickPreviewResolution(details);
+  if (!selectedResolution) {
+    return [];
+  }
+  const resolutions = resolutionDirectory
+    ? [selectedResolution]
+    : [
+        selectedResolution,
+        ...details.resolutions.filter(
+          (candidate) => candidate.directory !== selectedResolution.directory
+        )
+      ];
+  const byId = new Map<string, WatchfaceConfigAssetReference>();
+  for (const resolution of resolutions) {
+    for (const scope of ["config", "aod"] as const) {
+      for (const [configKey, rawPath] of pngConfigEntries(resolution, scope)) {
+        const id = watchfaceConfigAssetId(scope, configKey);
+        if (byId.has(id)) continue;
+        const relativePath = rawPath.replace(/\\/g, "/").replace(/^\.\//, "");
+        const archivePath = `${resolution.directory}/${relativePath}`;
+        byId.set(id, {
+          id,
+          scope,
+          configKey,
+          configPath: `${resolution.directory}/${scope === "aod" ? "AODconfig" : "config"}.txt`,
+          label: configAssetLabel(configKey, scope),
+          relativePath,
+          archivePath,
+          source: resolution.icons.find((file) => file.path === archivePath) ?? null
+        });
+      }
+    }
+  }
+  const references = [...byId.values()];
+  return references.sort((left, right) =>
+    (left.scope === right.scope ? 0 : left.scope === "config" ? -1 : 1) ||
+    left.label.localeCompare(right.label)
+  );
+}
+
+export interface WatchfaceAnalogPreviewLayer {
+  configKey:
+    | "time_hour_icon"
+    | "time_minute_icon"
+    | "time_center_polygon_icon1"
+    | "time_second_icon"
+    | "time_center_polygon_icon2";
+  source: CorosWatchfaceSpriteFile;
+  center: { x: number; y: number };
+  /** Null means a fixed center overlay; hands rotate clockwise from 12. */
+  rotationDegrees: number | null;
+}
+
+function directConfigSprite(
+  resolution: CorosWatchfaceResolutionDetails,
+  configKey: string
+): CorosWatchfaceSpriteFile | null {
+  const value = resolution.config[configKey]?.trim().replace(/\\/g, "/");
+  if (!value) return null;
+  const path = `${resolution.directory}/${value.replace(/^\.\//, "")}`;
+  return resolution.icons.find((candidate) => candidate.path === path) ?? null;
+}
+
+/**
+ * Recreates the firmware's analog compositing order. The two center overlays
+ * are fixed images: icon1 sits above hour/minute, while icon2 also sits above
+ * the second hand.
+ */
+export function getWatchfaceAnalogPreviewLayers(
+  resolution: CorosWatchfaceResolutionDetails,
+  now: Date
+): WatchfaceAnalogPreviewLayer[] {
+  const center = parseConfigPos(resolution.config.time_center_pos) ?? {
+    x: resolution.width / 2,
+    y: resolution.height / 2
+  };
+  const hourRotation =
+    ((now.getHours() % 12) + now.getMinutes() / 60 + now.getSeconds() / 3600) * 30;
+  const minuteRotation = (now.getMinutes() + now.getSeconds() / 60) * 6;
+  const secondRotation = (now.getSeconds() + now.getMilliseconds() / 1000) * 6;
+  const plan: Array<[
+    WatchfaceAnalogPreviewLayer["configKey"],
+    number | null
+  ]> = [
+    ["time_hour_icon", hourRotation],
+    ["time_minute_icon", minuteRotation],
+    ["time_center_polygon_icon1", null],
+    ["time_second_icon", secondRotation],
+    ["time_center_polygon_icon2", null]
+  ];
+  return plan.flatMap(([configKey, rotationDegrees]) => {
+    const source = directConfigSprite(resolution, configKey);
+    return source ? [{ configKey, source, center, rotationDegrees }] : [];
+  });
+}
+
+function configAssetFolder(id: string): string {
+  const safe = id.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  let hash = 2166136261;
+  for (const character of id) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${safe.slice(0, 52)}-${(hash >>> 0).toString(36)}`.slice(0, 64);
+}
+
+function configAssetCreatedRelativePath(id: string): string {
+  return `studio/${configAssetFolder(id)}/00.png`;
+}
+
+/**
+ * Applies per-reference visibility in preview and isolated replacement paths
+ * during export. A replacement never mutates another config key that happens
+ * to point at the same original PNG.
+ */
+export function buildWatchfaceConfigAssetOverrides(
+  details: CorosWatchfaceTemplateDetails,
+  overrides: Record<string, CorosWatchfaceConfigAssetOverride> = {},
+  includeReplacementPaths = false
+): CorosWatchfaceConfigOverride[] {
+  const result: CorosWatchfaceConfigOverride[] = [];
+  for (const resolution of details.resolutions) {
+    for (const scope of ["config", "aod"] as const) {
+      const values: Record<string, string> = {};
+      for (const [configKey] of pngConfigEntries(resolution, scope)) {
+        const id = watchfaceConfigAssetId(scope, configKey);
+        const override = overrides[id];
+        if (!override) continue;
+        if (override.enabled === false) {
+          values[configKey] = "";
+        } else if (
+          includeReplacementPaths &&
+          override.replacement &&
+          !(scope === "config" && configKey === "background_icon")
+        ) {
+          values[configKey] = configAssetCreatedRelativePath(id).replace(/\//g, "\\");
+        }
+      }
+      if (Object.keys(values).length > 0) {
+        result.push({
+          path: `${resolution.directory}/${scope === "aod" ? "AODconfig" : "config"}.txt`,
+          values
+        });
+      }
+    }
+  }
+  return result;
+}
+
+/** Builds native-sized created PNGs for every customized config reference. */
+export async function buildWatchfaceConfigAssetReplacements(
+  details: CorosWatchfaceTemplateDetails,
+  overrides: Record<string, CorosWatchfaceConfigAssetOverride> = {}
+): Promise<CorosWatchfaceAssetReplacement[]> {
+  const replacements: CorosWatchfaceAssetReplacement[] = [];
+  for (const resolution of details.resolutions) {
+    for (const scope of ["config", "aod"] as const) {
+      for (const [configKey, rawPath] of pngConfigEntries(resolution, scope)) {
+        const id = watchfaceConfigAssetId(scope, configKey);
+        const override = overrides[id];
+        if (!override?.replacement || override.enabled === false) continue;
+        if (scope === "config" && configKey === "background_icon") continue;
+        const relativePath = rawPath.replace(/\\/g, "/").replace(/^\.\//, "");
+        const source = resolution.icons.find(
+          (file) => file.path === `${resolution.directory}/${relativePath}`
+        );
+        const width = source?.width ?? override.replacement.width;
+        const height = source?.height ?? override.replacement.height;
+        replacements.push({
+          path: `${resolution.directory}/${configAssetCreatedRelativePath(id)}`,
+          dataUrl: await resizeAndTintSprite(
+            override.replacement.dataUrl,
+            Math.max(1, width),
+            Math.max(1, height)
+          ),
+          create: true
+        });
+      }
+    }
+  }
+  return replacements;
 }
 
 export type WatchfaceStaticSeparatorId = "colon" | "dateSlash";
@@ -180,7 +458,6 @@ export function buildStaticSeparatorOverrides(
       values.colon_icon = "";
     }
     if (
-      separators.colon.enabled &&
       separators.dateSlash.enabled &&
       Object.prototype.hasOwnProperty.call(resolution.config, "arc_cut_icon")
     ) {
@@ -1993,8 +2270,17 @@ export function applyConfigOverridesToDetails(
     ...details,
     resolutions: details.resolutions.map((resolution) => {
       const values = byPath.get(`${resolution.directory}/config.txt`);
-      return values
-        ? { ...resolution, config: { ...resolution.config, ...values } }
+      const aodValues = byPath.get(`${resolution.directory}/AODconfig.txt`);
+      return values || aodValues
+        ? {
+            ...resolution,
+            ...(values
+              ? { config: { ...resolution.config, ...values } }
+              : {}),
+            ...(aodValues
+              ? { aodConfig: { ...resolution.aodConfig, ...aodValues } }
+              : {})
+          }
         : resolution;
     })
   };
@@ -2638,10 +2924,11 @@ export async function drawStudioPreview(
   const colonFile = colonPath
     ? resolution.icons.find((icon) => icon.path === colonPath) ?? null
     : null;
+  const separatorIconColor = options.layerColors?.separators ??
+    (options.tintIcons ? options.accentColor : null);
   if (colonFile) {
     wantedSprites.set(colonFile.path, {
-      color: options.layerColors?.separators ??
-        (options.tintIcons ? options.accentColor : null)
+      color: separatorIconColor
     });
   }
   const arcCutValue = config["arc_cut_icon"]?.replace(/\\/g, "/");
@@ -2654,9 +2941,13 @@ export async function drawStudioPreview(
   const arcCutPos = parseConfigPos(config["arc_cut_icon_pos"]);
   if (arcCutFile) {
     wantedSprites.set(arcCutFile.path, {
-      color: options.layerColors?.separators ??
-        (options.tintIcons ? options.accentColor : null)
+      color: separatorIconColor
     });
+  }
+  const analogLayers = getWatchfaceAnalogPreviewLayers(resolution, now);
+  const analogIconColor = options.tintIcons ? options.accentColor : null;
+  for (const layer of analogLayers) {
+    wantedSprites.set(layer.source.path, { color: analogIconColor });
   }
 
   const ampmIcons = options.ampmStyle?.enabled ? findAmPmIcons(resolution) : null;
@@ -2768,7 +3059,21 @@ export async function drawStudioPreview(
       }
     : null;
   if (complicationIcon) {
+    const complicationIconColor = options.layerColors?.complication ??
+      (options.tintIcons ? options.accentColor : null);
     wantedSprites.set(complicationIcon.path, {
+      color: complicationIconColor
+    });
+  }
+  const controlColonValue = config.control_colon_icon?.replace(/\\/g, "/");
+  const controlColonPath = controlColonValue
+    ? `${resolution.directory}/${controlColonValue}`
+    : null;
+  const controlColonFile = controlColonPath
+    ? resolution.icons.find((icon) => icon.path === controlColonPath) ?? null
+    : null;
+  if (controlColonFile && relativeComplicationRects.length > 1) {
+    wantedSprites.set(controlColonFile.path, {
       color: options.layerColors?.complication ??
         (options.tintIcons ? options.accentColor : null)
     });
@@ -2886,6 +3191,29 @@ export async function drawStudioPreview(
       loaded.set(asset.path, await loadStudioImage(dataUrl));
     }
   }
+  const configuredAssetImages = new Map<string, HTMLImageElement>();
+  const configuredAssetImage = async (
+    configKey: string,
+    file: CorosWatchfaceSpriteFile,
+    color: string | null = null
+  ): Promise<HTMLImageElement | undefined> => {
+    const cacheKey = `${configKey}|${color ?? "original"}`;
+    const cached = configuredAssetImages.get(cacheKey);
+    if (cached) return cached;
+    const replacement = options.configAssetOverrides?.[
+      watchfaceConfigAssetId(options.configAssetScope ?? "config", configKey)
+    ]?.replacement;
+    const sourceDataUrl = replacement?.dataUrl ?? loadedAssets.get(file.path)?.dataUrl;
+    if (!sourceDataUrl) return loaded.get(file.path);
+    const image = await loadStudioImage(await resizeAndTintSprite(
+      sourceDataUrl,
+      file.width,
+      file.height,
+      replacement ? undefined : color ?? undefined
+    ));
+    configuredAssetImages.set(cacheKey, image);
+    return image;
+  };
 
   if (shouldRenderWatchfaceText("0123456789", options.fontFamily, options)) {
     for (const planned of digitPlan) {
@@ -2991,7 +3319,7 @@ export async function drawStudioPreview(
     const minuteHigh = digitPlan[2];
     const hourLowFile = hourLow?.source?.files[hourLow.digit];
     const minuteHighFile = minuteHigh?.source?.files[minuteHigh.digit];
-    const image = loaded.get(colonFile.path);
+    const image = await configuredAssetImage("colon_icon", colonFile, separatorIconColor);
     if (
       image &&
       hourLow?.pos &&
@@ -3026,7 +3354,7 @@ export async function drawStudioPreview(
   }
 
   if (arcCutFile && arcCutPos) {
-    const image = loaded.get(arcCutFile.path);
+    const image = await configuredAssetImage("arc_cut_icon", arcCutFile, separatorIconColor);
     if (image) {
       context.drawImage(
         image,
@@ -3087,7 +3415,17 @@ export async function drawStudioPreview(
   }
 
   if (complicationIcon && complicationIconPos) {
-    const image = loaded.get(complicationIcon.path);
+    const complicationIconKey = complicationPrefix
+      ? `control_${complicationPrefix}_icon`
+      : "";
+    const image = complicationIconKey
+      ? await configuredAssetImage(
+          complicationIconKey,
+          complicationIcon,
+          options.layerColors?.complication ??
+            (options.tintIcons ? options.accentColor : null)
+        )
+      : loaded.get(complicationIcon.path);
     if (image) {
       context.drawImage(
         image,
@@ -3234,6 +3572,29 @@ export async function drawStudioPreview(
     }
   }
 
+  if (controlColonFile && relativeComplicationRects.length > 1) {
+    const first = relativeComplicationRects[0]!.rect;
+    const second = relativeComplicationRects[1]!.rect;
+    const image = await configuredAssetImage(
+      "control_colon_icon",
+      controlColonFile,
+      options.layerColors?.complication ??
+        (options.tintIcons ? options.accentColor : null)
+    );
+    if (image) {
+      const centerX = controlOrigin.x + (first.x1 + second.x0) / 2;
+      const centerY = controlOrigin.y +
+        (first.y0 + first.y1 + second.y0 + second.y1) / 4;
+      context.drawImage(
+        image,
+        (centerX - controlColonFile.width / 2) * scale,
+        (centerY - controlColonFile.height / 2) * scale,
+        controlColonFile.width * scale,
+        controlColonFile.height * scale
+      );
+    }
+  }
+
   // AM/PM indicator: shows whichever sprite matches the preview time, styled
   // the same way the export will restyle the studio copies.
   const ampmStyle = options.ampmStyle;
@@ -3265,5 +3626,26 @@ export async function drawStudioPreview(
         height * scale
       );
     }
+  }
+
+  // Analog artwork uses a centered coordinate system instead of top-left
+  // positions. Keep this last so the firmware's hand/center-overlay stack is
+  // represented above the digital face content as it is on the watch.
+  for (const layer of analogLayers) {
+    const image = await configuredAssetImage(
+      layer.configKey,
+      layer.source,
+      analogIconColor
+    );
+    if (!image) continue;
+    const width = layer.source.width * scale;
+    const height = layer.source.height * scale;
+    context.save();
+    context.translate(layer.center.x * scale, layer.center.y * scale);
+    if (layer.rotationDegrees !== null) {
+      context.rotate((layer.rotationDegrees * Math.PI) / 180);
+    }
+    context.drawImage(image, -width / 2, -height / 2, width, height);
+    context.restore();
   }
 }
