@@ -652,13 +652,42 @@ export async function resizeAndTintSprite(
   return canvas.toDataURL("image/png");
 }
 
-export function loadStudioImage(dataUrl: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
+const STUDIO_IMAGE_CACHE_LIMIT = 96;
+const STUDIO_IMAGE_CACHE_MAX_SOURCE_LENGTH = 256_000;
+const studioImageCache = new Map<string, Promise<HTMLImageElement>>();
+
+export function loadStudioImage(
+  dataUrl: string,
+  cache = true
+): Promise<HTMLImageElement> {
+  const cacheable = cache && dataUrl.length <= STUDIO_IMAGE_CACHE_MAX_SOURCE_LENGTH;
+  const cached = cacheable ? studioImageCache.get(dataUrl) : undefined;
+  if (cached) {
+    // Refresh insertion order so frequently reused template sprites stay hot.
+    studioImageCache.delete(dataUrl);
+    studioImageCache.set(dataUrl, cached);
+    return cached;
+  }
+  const pending = new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
     image.onerror = () => reject(new Error("A studio image failed to load."));
     image.src = dataUrl;
   });
+  if (cacheable) {
+    studioImageCache.set(dataUrl, pending);
+    while (studioImageCache.size > STUDIO_IMAGE_CACHE_LIMIT) {
+      const oldest = studioImageCache.keys().next().value;
+      if (oldest === undefined) break;
+      studioImageCache.delete(oldest);
+    }
+    void pending.catch(() => {
+      if (studioImageCache.get(dataUrl) === pending) {
+        studioImageCache.delete(dataUrl);
+      }
+    });
+  }
+  return pending;
 }
 
 const MAX_ARTWORK_DIMENSION = 1400;
@@ -2503,7 +2532,7 @@ export async function drawStudioPreview(
   const scale = canvas.width / resolution.width;
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.drawImage(
-    await loadStudioImage(backgroundDataUrl),
+    await loadStudioImage(backgroundDataUrl, false),
     0,
     0,
     canvas.width,

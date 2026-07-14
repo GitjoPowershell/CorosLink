@@ -139,7 +139,7 @@ export function deriveDesignDetails(
   );
   const previewDetails = applyConfigOverridesToDetails(
     laidOutDetails,
-    buildLayerVisibilityOverrides(details, design.layerVisibility ?? {})
+    buildLayerVisibilityOverrides(laidOutDetails, design.layerVisibility ?? {})
   );
   return { metricOverrides, metricDetails, styledMetricDetails, previewDetails };
 }

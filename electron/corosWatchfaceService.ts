@@ -736,15 +736,30 @@ export async function loadCorosWatchfaceProject(
   projectId: string
 ): Promise<CorosWatchfaceProject> {
   const stored = await readStoredWatchfaceProject(projectId);
-  const templatePath = path.join(
+  const projectDirectory = path.join(
     watchfaceProjectsDirectory(),
-    stored.projectId,
-    "starter.dat"
+    stored.projectId
   );
+  const primaryTemplatePath = path.join(projectDirectory, "starter.dat");
+  const legacyTemplatePath = path.join(projectDirectory, "starter.zip");
+  const templatePath = (await pathIsFile(primaryTemplatePath))
+    ? primaryTemplatePath
+    : (await pathIsFile(legacyTemplatePath))
+      ? legacyTemplatePath
+      : primaryTemplatePath;
   await normalizeNestedProjectStarter(templatePath);
   const selected = await inspectArchive(templatePath);
   selectedArchives.set(selected.archiveId, selected);
   return { ...stored, archive: toPublicArchive(selected) };
+}
+
+async function pathIsFile(filePath: string): Promise<boolean> {
+  try {
+    return (await fs.promises.stat(filePath)).isFile();
+  } catch (caught) {
+    if ((caught as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw caught;
+  }
 }
 
 /**

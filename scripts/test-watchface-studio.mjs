@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   applyConfigOverridesToDetails,
   buildAmPmOverrides,
@@ -20,6 +21,7 @@ import {
   getAmPmCapability,
   getFixedMetricCapabilities,
   inferStaticSeparators,
+  loadStudioImage,
   mergeAssetReplacements,
   mergeConfigOverrides,
   normalizeRasterFontGlyphs,
@@ -383,6 +385,46 @@ assert.equal(
 );
 
 const withMetrics = applyConfigOverridesToDetails(details, metricOverrides);
+
+// Drag isolation hides fixed metrics after their empty starter rectangles have
+// been created and positioned by the design pipeline. Looking at the original
+// template here would miss all four keys and leave the old value visible.
+const allFixedMetrics = applyConfigOverridesToDetails(
+  details,
+  buildMetricOverrides(details, {
+    heartRate: true,
+    steps: true,
+    calories: true,
+    elevation: true
+  })
+);
+const isolatedFixedMetrics = applyConfigOverridesToDetails(
+  allFixedMetrics,
+  buildLayerVisibilityOverrides(allFixedMetrics, {
+    heartRate: false,
+    steps: false,
+    calories: false,
+    elevation: false
+  })
+);
+for (const fixedMetricKey of [
+  "heartreate_level_rect",
+  "step_rect",
+  "kcal_rect",
+  "elevation_rect"
+]) {
+  for (const derivedResolution of isolatedFixedMetrics.resolutions) {
+    assert.equal(derivedResolution.config[fixedMetricKey], "");
+  }
+}
+const composeSource = await readFile(
+  new URL("../src/watchfaces/watchfaceCompose.ts", import.meta.url),
+  "utf8"
+);
+assert.match(
+  composeSource,
+  /buildLayerVisibilityOverrides\(laidOutDetails, design\.layerVisibility \?\? \{\}\)/
+);
 const inferredSeparators = inferStaticSeparators(withMetrics);
 assert.deepEqual(inferredSeparators.colon, {
   enabled: false,
@@ -620,5 +662,41 @@ assert.equal(
   merged.find((entry) => entry.path.includes("800x800"))?.values.heartreate_level_rect,
   "{144,596,276,660,hcenter|vcenter}"
 );
+
+// Stable template assets reuse their decoded image, while dynamic background
+// frames can explicitly bypass the cache during drag rendering.
+const nativeImage = globalThis.Image;
+let imageConstructions = 0;
+globalThis.Image = class FakeImage {
+  onload = null;
+  onerror = null;
+  set src(value) {
+    this.currentSrc = value;
+    imageConstructions += 1;
+    queueMicrotask(() => this.onload?.());
+  }
+};
+try {
+  const cachedImage = await loadStudioImage("data:image/png;base64,CACHED");
+  const cachedAgain = await loadStudioImage("data:image/png;base64,CACHED");
+  assert.equal(cachedAgain, cachedImage);
+  assert.equal(imageConstructions, 1);
+  const uncachedImage = await loadStudioImage(
+    "data:image/png;base64,DYNAMIC",
+    false
+  );
+  const uncachedAgain = await loadStudioImage(
+    "data:image/png;base64,DYNAMIC",
+    false
+  );
+  assert.notEqual(uncachedAgain, uncachedImage);
+  assert.equal(imageConstructions, 3);
+} finally {
+  if (nativeImage === undefined) {
+    delete globalThis.Image;
+  } else {
+    globalThis.Image = nativeImage;
+  }
+}
 
 console.log("COROS watchface studio tests passed");

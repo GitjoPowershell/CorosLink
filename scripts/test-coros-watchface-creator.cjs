@@ -180,6 +180,20 @@ async function main() {
     false
   );
   await fs.access(`${nestedProjectStarter}.nested-backup`);
+  const legacyProjectStarter = path.join(
+    path.dirname(nestedProjectStarter),
+    "starter.zip"
+  );
+  await fs.rename(nestedProjectStarter, legacyProjectStarter);
+  const legacyLoadedProject = await watchfaces.loadCorosWatchfaceProject(
+    savedProject.projectId
+  );
+  assert.equal(legacyLoadedProject.archive.fileName, "starter.zip");
+  assert.equal(
+    legacyLoadedProject.archive.sourceTemplateId,
+    "250601",
+    "projects saved with the legacy starter.zip filename should remain readable"
+  );
   await watchfaces.deleteCorosWatchfaceProject(savedProject.projectId);
   assert.equal(
     (await watchfaces.listCorosWatchfaceProjects()).some(
