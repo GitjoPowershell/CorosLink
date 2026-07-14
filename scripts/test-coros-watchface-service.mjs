@@ -19,6 +19,7 @@ const {
   normalizeCorosBatteryReport,
   normalizeCorosPairedDevices,
   normalizeCorosWatchfaceThemes,
+  parseCorosWatchfaceSharePage,
   selectCorosWatchfaceArchive
 } = await import(`${distUrl("corosWatchfaceService.js")}?cacheBust=${Date.now()}`);
 const { createStoreZip } = await import(
@@ -71,6 +72,65 @@ assert.equal(
   ).length,
   64,
   "mobile password must encrypt the 32-character MD5 digest"
+);
+
+const sharePageState = {
+  apiData: {
+    data: {
+      data: {
+        watchFaceTemplateUserCustom: {
+          firmwareType: "COROS W541",
+          watchFaceTemplateName: "BOLD2",
+          watchFaceTemplateUrl:
+            "https://s3eu.coros.com/watchface_template_user_custom/0/bold2.zip"
+        }
+      }
+    }
+  },
+  pageData: { isExpired: false }
+};
+assert.deepEqual(
+  parseCorosWatchfaceSharePage(
+    `<html><script> window.__INITIAL_STATE__= ${JSON.stringify(sharePageState)};</script></html>`
+  ),
+  {
+    firmwareType: "COROS W541",
+    name: "BOLD2",
+    packageUrl:
+      "https://s3eu.coros.com/watchface_template_user_custom/0/bold2.zip"
+  },
+  "public COROS share pages should expose their editable archive metadata"
+);
+assert.throws(
+  () =>
+    parseCorosWatchfaceSharePage(
+      `<script>window.__INITIAL_STATE__=${JSON.stringify({
+        ...sharePageState,
+        pageData: { isExpired: true }
+      })};</script>`
+    ),
+  /expired/,
+  "expired COROS share links should not import"
+);
+assert.throws(
+  () =>
+    parseCorosWatchfaceSharePage(
+      `<script>window.__INITIAL_STATE__=${JSON.stringify({
+        ...sharePageState,
+        apiData: {
+          data: {
+            data: {
+              watchFaceTemplateUserCustom: {
+                watchFaceTemplateName: "Untrusted",
+                watchFaceTemplateUrl: "https://example.com/watchface.zip"
+              }
+            }
+          }
+        }
+      })};</script>`
+    ),
+  /not hosted by COROS/,
+  "share imports should reject archives hosted outside COROS"
 );
 
 assert.equal(
@@ -349,6 +409,7 @@ try {
   assert.equal(selected.fileName, "fixture.dat");
   assert.equal(selected.sourceTemplateId, "250601");
   assert.equal(selected.diyVersion, 1);
+  assert.equal(selected.watchFaceVersion, 0);
   assert.ok(selected.archiveId.length > 0);
 } finally {
   await fs.rm(tempDirectory, { recursive: true, force: true });

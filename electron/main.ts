@@ -62,6 +62,7 @@ import {
   downloadCorosWatchfaceTheme,
   getCorosBatteryReport,
   getCorosWatchfaceStatus,
+  importCorosWatchfaceShareLink,
   listCorosPairedDevices,
   listCorosWatchfaceThemes,
   loadCorosWatchfaceArtwork,
@@ -701,6 +702,10 @@ function registerIpcHandlers(): void {
     "watchfaces:downloadTheme",
     (_event, input: CorosWatchfaceThemeDownloadInput) =>
       downloadCorosWatchfaceTheme(input)
+  );
+
+  ipcMain.handle("watchfaces:importShareLink", (_event, shareUrl: string) =>
+    importCorosWatchfaceShareLink(shareUrl)
   );
 
   ipcMain.handle("watchfaces:chooseArchive", async () => {

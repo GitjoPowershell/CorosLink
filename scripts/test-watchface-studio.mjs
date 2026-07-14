@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   applyConfigOverridesToDetails,
   buildAmPmOverrides,
@@ -13,16 +14,25 @@ import {
   buildStaticSeparatorOverrides,
   buildTimeStyleOverrides,
   buildTimeTrackingOverrides,
+  buildWatchfaceConfigAssetOverrides,
   computeLayoutGroupBounds,
   computeLayoutOffsetLimits,
   corosWeekdayIndex,
+  detailsForPreviewMode,
+  detailsForPreviewResolution,
   getAvailableComplications,
   getAmPmCapability,
   getFixedMetricCapabilities,
+  getTemplateBackgroundAssetPaths,
+  getWatchfaceAnalogPreviewLayers,
+  hasWatchfaceAod,
   inferStaticSeparators,
+  listWatchfaceConfigAssets,
+  loadStudioImage,
   mergeAssetReplacements,
   mergeConfigOverrides,
   normalizeRasterFontGlyphs,
+  pickWatchPreviewResolution,
   rasterFontSupportsText,
   rebaseNegativeControlChildren,
   scaleConfigRectValue
@@ -90,7 +100,10 @@ function resolution(width, digitWidth, digitHeight) {
       am_icon: "icon\\am.png",
       pm_icon: "icon\\pm.png",
       am_pm_icon_pos: `{${Math.round(width * 0.6)},${Math.round(width * 0.125)}}`,
+      background_icon: "background.png",
       colon_icon: "icon\\colon.png",
+      control_colon_icon: "icon\\colon.png",
+      watchface_thmb_icon: "thmb.png",
       arc_cut_icon_pos: `{${Math.round(width * 0.3)},${Math.round(width * 0.2)}}`,
       arc_cut_icon: "icon\\cut.png",
       time_hour_high_pos: `{${Math.round(width * 0.125)},${Math.round(width * 0.125)}}`,
@@ -121,7 +134,9 @@ function resolution(width, digitWidth, digitHeight) {
       control_step_rect: `{${Math.round(width * 0.1)},0,${Math.round(width * 0.38)},${digitHeight},hcenter|vcenter}`,
       control_step_font: "13x19"
     },
-    aodConfig: {},
+    aodConfig: {
+      background_icon: "a\\icon\\aod-background.png"
+    },
     spriteFolders: [
       {
         folder: "13x19",
@@ -149,6 +164,26 @@ function resolution(width, digitWidth, digitHeight) {
         height: Math.round(width * 0.3)
       },
       {
+        path: `${directory}/icon/colon.png`,
+        width: Math.max(4, Math.round(width * 0.04)),
+        height: Math.max(7, Math.round(width * 0.065))
+      },
+      {
+        path: `${directory}/background.png`,
+        width,
+        height: width
+      },
+      {
+        path: `${directory}/thmb.png`,
+        width,
+        height: width
+      },
+      {
+        path: `${directory}/a/icon/aod-background.png`,
+        width,
+        height: width
+      },
+      {
         path: `${directory}/icon/am.png`,
         width: Math.round(width * 0.08),
         height: Math.round(width * 0.04)
@@ -162,10 +197,178 @@ function resolution(width, digitWidth, digitHeight) {
   };
 }
 
+const apexPreviewDetails = {
+  archiveId: "apex-preview",
+  resolutions: [
+    resolution(240, 7, 11),
+    resolution(260, 8, 12),
+    resolution(280, 9, 13),
+    resolution(800, 24, 38)
+  ]
+};
+assert.equal(
+  pickWatchPreviewResolution(apexPreviewDetails)?.width,
+  260,
+  "240/260/800 MIP bundles should preview the APEX 4 46 mm tree by default"
+);
+assert.deepEqual(
+  detailsForPreviewResolution(apexPreviewDetails, "watchface_240x240")
+    .resolutions.map(({ width }) => width),
+  [240],
+  "Studio should be able to render one physical watch tree without changing the master"
+);
+assert.equal(
+  pickWatchPreviewResolution({
+    archiveId: "amoled-preview",
+    resolutions: [resolution(416, 12, 20), resolution(800, 24, 38)]
+  })?.width,
+  416,
+  "AMOLED bundles should preview the physical 416px tree instead of the 800px master"
+);
+
+assert.deepEqual(
+  getTemplateBackgroundAssetPaths({
+    archiveId: "fixture",
+    resolutions: [resolution(416, 12, 20), resolution(800, 24, 38)]
+  }),
+  [
+    "watchface_800x800/background.png",
+    "watchface_800x800/watchface_customize.png",
+    "watchface_customize.png"
+  ],
+  "Studio should initialize imported artwork from the largest on-watch background"
+);
+
 const details = {
   archiveId: "fixture",
   resolutions: [resolution(416, 23, 33), resolution(800, 44, 64)]
 };
+
+assert.equal(hasWatchfaceAod(details), true);
+assert.equal(
+  hasWatchfaceAod({
+    archiveId: "no-aod",
+    resolutions: [{ ...resolution(260, 8, 12), aodConfig: {} }]
+  }),
+  false
+);
+const hiddenAodDetails = applyConfigOverridesToDetails(details, [
+  {
+    path: "watchface_800x800/AODconfig.txt",
+    values: { background_icon: "" }
+  }
+]);
+assert.equal(
+  hiddenAodDetails.resolutions[1].aodConfig.background_icon,
+  "",
+  "AOD overrides should be reflected in preview details"
+);
+assert.equal(
+  hiddenAodDetails.resolutions[1].config.background_icon,
+  "background.png",
+  "AOD preview overrides must not alter the current-face config"
+);
+const aodPreviewDetails = detailsForPreviewMode(hiddenAodDetails, "aod");
+assert.equal(aodPreviewDetails.resolutions[1].config.background_icon, "");
+assert.equal(
+  detailsForPreviewMode(details, "current"),
+  details,
+  "The current preview should retain the original details object"
+);
+
+const analogResolution = resolution(260, 8, 12);
+analogResolution.config.time_center_pos = "{130,130}";
+Object.assign(analogResolution.config, {
+  time_hour_icon: "icon\\hour.png",
+  time_minute_icon: "icon\\minute.png",
+  time_center_polygon_icon1: "center-behind.png",
+  time_second_icon: "icon\\second.png",
+  time_center_polygon_icon2: "center-top.png"
+});
+analogResolution.icons.push(
+  { path: `${analogResolution.directory}/icon/hour.png`, width: 40, height: 260 },
+  { path: `${analogResolution.directory}/icon/minute.png`, width: 40, height: 260 },
+  { path: `${analogResolution.directory}/center-behind.png`, width: 72, height: 260 },
+  { path: `${analogResolution.directory}/icon/second.png`, width: 20, height: 260 },
+  { path: `${analogResolution.directory}/center-top.png`, width: 30, height: 30 }
+);
+const analogLayers = getWatchfaceAnalogPreviewLayers(
+  analogResolution,
+  new Date(2026, 0, 1, 3, 15, 30)
+);
+assert.deepEqual(
+  analogLayers.map(({ configKey }) => configKey),
+  [
+    "time_hour_icon",
+    "time_minute_icon",
+    "time_center_polygon_icon1",
+    "time_second_icon",
+    "time_center_polygon_icon2"
+  ],
+  "Analog assets should follow the firmware hand and center-overlay stack"
+);
+assert.deepEqual(
+  analogLayers.map(({ center }) => center),
+  Array.from({ length: 5 }, () => ({ x: 130, y: 130 })),
+  "Every analog asset should share time_center_pos"
+);
+assert.equal(analogLayers[0].rotationDegrees, 97.75);
+assert.equal(analogLayers[1].rotationDegrees, 93);
+assert.equal(analogLayers[2].rotationDegrees, null);
+assert.equal(analogLayers[3].rotationDegrees, 180);
+assert.equal(analogLayers[4].rotationDegrees, null);
+
+const configAssets = listWatchfaceConfigAssets(details);
+assert.deepEqual(
+  configAssets.map(({ id }) => id),
+  [
+    "config:am_icon",
+    "config:background_icon",
+    "config:control_colon_icon",
+    "config:arc_cut_icon",
+    "config:pm_icon",
+    "config:colon_icon",
+    "config:watchface_thmb_icon",
+    "aod:background_icon"
+  ],
+  "Every direct PNG reference should appear once per config key and scope"
+);
+assert.equal(
+  configAssets.find(({ id }) => id === "config:colon_icon")?.archivePath,
+  "watchface_800x800/icon/colon.png"
+);
+assert.equal(
+  configAssets.find(({ id }) => id === "config:control_colon_icon")?.archivePath,
+  "watchface_800x800/icon/colon.png",
+  "Shared source files should remain separate editable config entries"
+);
+const replacement = {
+  dataUrl: "data:image/png;base64,AA==",
+  width: 32,
+  height: 48
+};
+const configAssetOverrides = buildWatchfaceConfigAssetOverrides(
+  details,
+  {
+    "config:colon_icon": { enabled: false },
+    "config:control_colon_icon": { enabled: true, replacement },
+    "config:background_icon": { enabled: true, replacement },
+    "aod:background_icon": { enabled: false }
+  },
+  true
+);
+for (const override of configAssetOverrides.filter(({ path }) => /\/config\.txt$/i.test(path))) {
+  assert.equal(override.values.colon_icon, "");
+  assert.match(override.values.control_colon_icon, /^studio\\config-control_colon_icon-/);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(override.values, "background_icon"),
+    false,
+    "The composed background should keep using the archive's original background path"
+  );
+}
+for (const override of configAssetOverrides.filter(({ path }) => /AODconfig\.txt$/i.test(path))) {
+  assert.equal(override.values.background_icon, "");
+}
 
 assert.deepEqual(getAmPmCapability(details), {
   icon: {
@@ -383,6 +586,46 @@ assert.equal(
 );
 
 const withMetrics = applyConfigOverridesToDetails(details, metricOverrides);
+
+// Drag isolation hides fixed metrics after their empty starter rectangles have
+// been created and positioned by the design pipeline. Looking at the original
+// template here would miss all four keys and leave the old value visible.
+const allFixedMetrics = applyConfigOverridesToDetails(
+  details,
+  buildMetricOverrides(details, {
+    heartRate: true,
+    steps: true,
+    calories: true,
+    elevation: true
+  })
+);
+const isolatedFixedMetrics = applyConfigOverridesToDetails(
+  allFixedMetrics,
+  buildLayerVisibilityOverrides(allFixedMetrics, {
+    heartRate: false,
+    steps: false,
+    calories: false,
+    elevation: false
+  })
+);
+for (const fixedMetricKey of [
+  "heartreate_level_rect",
+  "step_rect",
+  "kcal_rect",
+  "elevation_rect"
+]) {
+  for (const derivedResolution of isolatedFixedMetrics.resolutions) {
+    assert.equal(derivedResolution.config[fixedMetricKey], "");
+  }
+}
+const composeSource = await readFile(
+  new URL("../src/watchfaces/watchfaceCompose.ts", import.meta.url),
+  "utf8"
+);
+assert.match(
+  composeSource,
+  /buildLayerVisibilityOverrides\(laidOutDetails, design\.layerVisibility \?\? \{\}\)/
+);
 const inferredSeparators = inferStaticSeparators(withMetrics);
 assert.deepEqual(inferredSeparators.colon, {
   enabled: false,
@@ -620,5 +863,41 @@ assert.equal(
   merged.find((entry) => entry.path.includes("800x800"))?.values.heartreate_level_rect,
   "{144,596,276,660,hcenter|vcenter}"
 );
+
+// Stable template assets reuse their decoded image, while dynamic background
+// frames can explicitly bypass the cache during drag rendering.
+const nativeImage = globalThis.Image;
+let imageConstructions = 0;
+globalThis.Image = class FakeImage {
+  onload = null;
+  onerror = null;
+  set src(value) {
+    this.currentSrc = value;
+    imageConstructions += 1;
+    queueMicrotask(() => this.onload?.());
+  }
+};
+try {
+  const cachedImage = await loadStudioImage("data:image/png;base64,CACHED");
+  const cachedAgain = await loadStudioImage("data:image/png;base64,CACHED");
+  assert.equal(cachedAgain, cachedImage);
+  assert.equal(imageConstructions, 1);
+  const uncachedImage = await loadStudioImage(
+    "data:image/png;base64,DYNAMIC",
+    false
+  );
+  const uncachedAgain = await loadStudioImage(
+    "data:image/png;base64,DYNAMIC",
+    false
+  );
+  assert.notEqual(uncachedAgain, uncachedImage);
+  assert.equal(imageConstructions, 3);
+} finally {
+  if (nativeImage === undefined) {
+    delete globalThis.Image;
+  } else {
+    globalThis.Image = nativeImage;
+  }
+}
 
 console.log("COROS watchface studio tests passed");

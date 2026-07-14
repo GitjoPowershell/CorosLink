@@ -100,6 +100,7 @@ import type {
   CorosWatchfaceProjectSummary,
   CorosWatchfacePublishInput,
   CorosWatchfaceRegion,
+  CorosWatchfaceShareImport,
   CorosWatchfaceShareLink,
   CorosWatchfaceStatus,
   CorosWatchfaceTemplateAsset,
@@ -155,6 +156,10 @@ const api = {
     input: CorosWatchfaceThemeDownloadInput
   ): Promise<CorosWatchfaceThemeDownload> =>
     ipcRenderer.invoke("watchfaces:downloadTheme", input),
+  importCorosWatchfaceShareLink: (
+    shareUrl: string
+  ): Promise<CorosWatchfaceShareImport> =>
+    ipcRenderer.invoke("watchfaces:importShareLink", shareUrl),
   chooseCorosWatchfaceArchive: (): Promise<CorosWatchfaceArchive | null> =>
     ipcRenderer.invoke("watchfaces:chooseArchive"),
   chooseLegacy614aCarrier: (): Promise<CorosLegacy614aCarrierSelection | null> =>

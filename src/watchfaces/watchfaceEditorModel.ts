@@ -12,6 +12,7 @@ import {
   computeLayoutGroupBounds,
   getFixedMetricCapabilities,
   getAmPmCapability,
+  listWatchfaceConfigAssets,
   mergeConfigOverrides,
   pickPreviewResolution,
   WATCHFACE_LAYOUT_GROUPS,
@@ -45,6 +46,7 @@ export type EditorLayerKind =
   | "complication"
   | "metric"
   | "weather"
+  | "configAsset"
   | "customSprite";
 
 /** Which inspector controls a layer supports. */
@@ -73,6 +75,9 @@ export interface EditorLayer {
   spriteId?: string;
   /** Set for editor-authored colon and date-slash layers. */
   staticSeparatorId?: WatchfaceStaticSeparatorId;
+  /** Set for a direct PNG reference parsed from config.txt/AODconfig.txt. */
+  configAssetId?: string;
+  configAssetReplaced?: boolean;
   /** Set for the firmware-swapped AM/PM sprite pair. */
   ampmIndicator?: true;
   /** Set for the dynamic 41-state weather sprite folder. */
@@ -263,8 +268,8 @@ export function deriveEditorLayers(
 
   const staticSeparatorLayers: EditorLayer[] = [];
   for (const [staticSeparatorId, id, label] of [
-    ["colon", "staticColon", "Time colon"],
-    ["dateSlash", "staticDateSlash", "Date slash"]
+    ["colon", "staticColon", "Custom time colon"],
+    ["dateSlash", "staticDateSlash", "Custom date slash"]
   ] as const) {
     const separator = design.staticSeparators?.[staticSeparatorId];
     const visible = Boolean(separator?.enabled);
@@ -303,8 +308,7 @@ export function deriveEditorLayers(
     const style = design.ampmIndicator ?? {
       enabled: ampmCapability.active,
       ...ampmCapability.defaultPos,
-      scale: 1,
-      color: design.digitColor
+      scale: 1
     };
     const width = ampmCapability.icon.width * style.scale;
     const height = ampmCapability.icon.height * style.scale;
@@ -363,6 +367,29 @@ export function deriveEditorLayers(
     });
   }
 
+  for (const reference of listWatchfaceConfigAssets(details)) {
+    // The current-face background_icon is the source behind the editable
+    // Artwork → Background layer below. Exposing it again as a template asset
+    // creates two controls for the same on-watch image. Keep AOD background
+    // assets visible because those are independent of the current artwork.
+    if (reference.id === "config:background_icon") {
+      continue;
+    }
+    const override = design.configAssetOverrides?.[reference.id];
+    layers.push({
+      id: `configAsset:${reference.id}`,
+      kind: "configAsset",
+      label: reference.label,
+      configAssetId: reference.id,
+      configAssetReplaced: Boolean(override?.replacement),
+      visible: override?.enabled !== false,
+      canHide: true,
+      present: true,
+      bounds: null,
+      capabilities: NO_CAPABILITIES
+    });
+  }
+
   for (const sprite of design.designSprites ?? []) {
     // Sprites are drawn centered on (x, y); use a rotation-aware bounding box
     // so the selection outline hugs the image.
@@ -396,8 +423,8 @@ export function deriveEditorLayers(
     id: "background",
     kind: "background",
     label: "Background",
-    visible: true,
-    canHide: false,
+    visible: design.artworkVisible !== false,
+    canHide: true,
     present: true,
     bounds: resolution
       ? { id: "background", label: "Background", x0: 0, y0: 0, x1: resolution.width, y1: resolution.height }

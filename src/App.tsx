@@ -1720,6 +1720,7 @@ export default function App() {
               <WatchfacesView
                 api={api}
                 showDevelopmentTools={showDevelopmentTools}
+                watchStatus={watchStatus}
               />
             ) : null}
             {activeView === "training" ? (
