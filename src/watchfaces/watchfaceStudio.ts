@@ -486,6 +486,25 @@ export interface WatchfaceAmPmStyle {
   fontFamily?: string;
 }
 
+/**
+ * Converts the master authoring position to a device resolution for preview.
+ * Export performs the same conversion while building each config override.
+ */
+export function scaleAmPmStyleForResolution(
+  style: WatchfaceAmPmStyle,
+  source: Pick<CorosWatchfaceResolutionDetails, "width" | "height">,
+  target: Pick<CorosWatchfaceResolutionDetails, "width" | "height">
+): WatchfaceAmPmStyle {
+  if (source.width === target.width && source.height === target.height) {
+    return style;
+  }
+  return {
+    ...style,
+    x: style.x * (target.width / source.width),
+    y: style.y * (target.height / source.height)
+  };
+}
+
 const AMPM_CONFIG_KEYS = ["am_icon", "pm_icon", "am_pm_icon_pos"] as const;
 // The main process only accepts created sprites under studio/<name>/NN.png,
 // so the AM icon becomes 00.png and the PM icon 01.png of one studio folder.

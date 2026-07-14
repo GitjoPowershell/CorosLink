@@ -86,6 +86,7 @@ import {
   downscaleArtwork,
   drawStudioPreview,
   getAmPmCapability,
+  scaleAmPmStyleForResolution,
   getAvailableComplications,
   getTemplateBackgroundAssetPaths,
   hasWatchfaceAod,
@@ -100,6 +101,7 @@ import {
   type WatchfaceConfigAssetReference,
   type WatchfaceMetricId,
   type WatchfacePreviewMode,
+  type WatchfaceStudioOptions,
   type WatchfaceStaticSeparatorId,
   type WatchfaceTimePartId
 } from "./watchfaceStudio";
@@ -724,6 +726,26 @@ export function WatchfaceEditor({
     Math.round(value * watchCoordinateScale);
   const fromWatchCoordinate = (value: number) =>
     value / watchCoordinateScale;
+  const studioOptionsForResolution = useCallback(
+    (
+      options: WatchfaceStudioOptions,
+      resolutionDetails: CorosWatchfaceTemplateDetails
+    ): WatchfaceStudioOptions => {
+      const target = pickPreviewResolution(resolutionDetails);
+      if (!options.ampmStyle || !previewResolution || !target) {
+        return options;
+      }
+      return {
+        ...options,
+        ampmStyle: scaleAmPmStyleForResolution(
+          options.ampmStyle,
+          previewResolution,
+          target
+        )
+      };
+    },
+    [previewResolution]
+  );
 
   useEffect(() => {
     setWatchPreviewDirectory("");
@@ -1147,7 +1169,7 @@ export function WatchfaceEditor({
       frame,
       frameBackground,
       frameDetails,
-      toStudioOptions(frameDesign),
+      studioOptionsForResolution(toStudioOptions(frameDesign), frameDetails),
       loadAssets
     );
     if (frameDesign.weatherIndicator?.enabled) {
@@ -1314,7 +1336,7 @@ export function WatchfaceEditor({
               frame,
               next.backgroundDataUrl,
               next.details,
-              next.options,
+              studioOptionsForResolution(next.options, next.details),
               next.loadAssets
             );
             if (next.weather?.enabled) {
@@ -1379,7 +1401,7 @@ export function WatchfaceEditor({
         queue.running = false;
       })();
     },
-    []
+    [studioOptionsForResolution]
   );
 
   // Coalesce accurate preview work into one active render plus the newest
@@ -2518,7 +2540,10 @@ export function WatchfaceEditor({
           archivePreview,
           backgroundDataUrl,
           renderedPreviewDetails ?? previewDetails ?? details,
-          studioOptions,
+          studioOptionsForResolution(
+            studioOptions,
+            renderedPreviewDetails ?? previewDetails ?? details
+          ),
           loadAssets
         )
       ]);
