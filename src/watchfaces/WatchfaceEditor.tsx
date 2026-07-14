@@ -39,7 +39,8 @@ import type {
   CorosWatchfaceDesignState,
   CorosWatchfaceProject,
   CorosWatchfaceTemplateAsset,
-  CorosWatchfaceTemplateDetails
+  CorosWatchfaceTemplateDetails,
+  WatchModelId
 } from "../../electron/types";
 
 /** Any subset of shape fields, minus the discriminant, for in-place edits. */
@@ -75,14 +76,17 @@ import {
 import {
   computeLayoutGroupBounds,
   computeLayoutOffsetLimits,
+  detailsForPreviewResolution,
   downscaleArtwork,
   drawStudioPreview,
   getAmPmCapability,
   getAvailableComplications,
+  getTemplateBackgroundAssetPaths,
   inferStaticSeparators,
   loadStudioImage,
   parseConfigPos,
   pickPreviewResolution,
+  pickWatchPreviewResolution,
   type WatchfaceDatePartId,
   type WatchfaceAssetLoader,
   type WatchfaceMetricId,
@@ -130,6 +134,8 @@ interface WatchfaceEditorProps {
   api: CorosLinkApi;
   sessionId: string;
   starterArchive: CorosWatchfaceArchive;
+  targetFirmwareType?: string;
+  targetWatchModel?: WatchModelId;
   initialDesign?: CorosWatchfaceDesignState;
   initialProjectId?: string;
   initialProjectName?: string;
@@ -235,6 +241,8 @@ export function WatchfaceEditor({
   api,
   sessionId,
   starterArchive,
+  targetFirmwareType,
+  targetWatchModel,
   initialDesign,
   initialProjectId,
   initialProjectName,
@@ -298,6 +306,7 @@ export function WatchfaceEditor({
   const [layersOpen, setLayersOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(false);
   const [stageZoom, setStageZoom] = useState<"fit" | number>("fit");
+  const [watchPreviewDirectory, setWatchPreviewDirectory] = useState("");
   const [placementMenuOpen, setPlacementMenuOpen] = useState(false);
   const [placementPreferences, setPlacementPreferences] =
     useState<WatchfacePlacementPreferences>(() =>
@@ -481,55 +490,79 @@ export function WatchfaceEditor({
     let cancelled = false;
     api
       .describeCorosWatchfaceTemplate(starterArchive.archiveId)
-      .then((described) => {
-        if (!cancelled) {
-          setDetails(described);
-          const current = historyRef.current;
-          let nextDesign = current.present.value.design;
-          if (!initialDesign) {
-              nextDesign = {
-                ...nextDesign,
-                staticSeparators: inferStaticSeparators(described, nextDesign.digitColor)
-              };
-          }
-          if (!initialDesign?.ampmIndicator) {
-              const capability = getAmPmCapability(described);
-              if (capability) {
-                nextDesign = {
-                  ...nextDesign,
-                  ampmIndicator: {
-                    enabled: capability.active,
-                    ...capability.defaultPos,
-                    scale: 1,
-                    color: nextDesign.digitColor
-                  }
-                };
+      .then(async (described) => {
+        let templateArtwork: CorosWatchfaceTemplateAsset | undefined;
+        if (!initialDesign) {
+          for (const assetPath of getTemplateBackgroundAssetPaths(described)) {
+            try {
+              const [asset] = await loadAssets([assetPath]);
+              if (asset) {
+                templateArtwork = asset;
+                break;
               }
-          }
-          if (!initialDesign?.weatherIndicator) {
-              const capability = getWeatherCapability(described);
-              if (capability) {
-                nextDesign = {
-                  ...nextDesign,
-                  weatherIndicator: {
-                    enabled: capability.active,
-                    ...capability.defaultPos,
-                    scale: 1
-                  }
-                };
-              }
-          }
-          const initialized = {
-            ...current,
-            present: {
-              ...current.present,
-              value: { ...current.present.value, design: nextDesign }
+            } catch {
+              // Older templates may only include one of the preview variants.
             }
-          };
-          historyRef.current = initialized;
-          setHistoryState(initialized);
-          setCheckpoint(createWatchfaceEditorCheckpoint(initialized, sessionId));
+          }
         }
+        if (cancelled) return;
+
+        setDetails(described);
+        const current = historyRef.current;
+        let nextDesign = current.present.value.design;
+        if (!initialDesign) {
+          nextDesign = {
+            ...nextDesign,
+            ...(templateArtwork
+              ? {
+                  artwork: {
+                    dataUrl: templateArtwork.dataUrl,
+                    width: templateArtwork.width,
+                    height: templateArtwork.height
+                  },
+                  zoom: 1
+                }
+              : {}),
+            staticSeparators: inferStaticSeparators(described, nextDesign.digitColor)
+          };
+        }
+        if (!initialDesign?.ampmIndicator) {
+          const capability = getAmPmCapability(described);
+          if (capability) {
+            nextDesign = {
+              ...nextDesign,
+              ampmIndicator: {
+                enabled: capability.active,
+                ...capability.defaultPos,
+                scale: 1,
+                color: nextDesign.digitColor
+              }
+            };
+          }
+        }
+        if (!initialDesign?.weatherIndicator) {
+          const capability = getWeatherCapability(described);
+          if (capability) {
+            nextDesign = {
+              ...nextDesign,
+              weatherIndicator: {
+                enabled: capability.active,
+                ...capability.defaultPos,
+                scale: 1
+              }
+            };
+          }
+        }
+        const initialized = {
+          ...current,
+          present: {
+            ...current.present,
+            value: { ...current.present.value, design: nextDesign }
+          }
+        };
+        historyRef.current = initialized;
+        setHistoryState(initialized);
+        setCheckpoint(createWatchfaceEditorCheckpoint(initialized, sessionId));
       })
       .catch((caught) => {
         if (!cancelled) {
@@ -539,7 +572,14 @@ export function WatchfaceEditor({
     return () => {
       cancelled = true;
     };
-  }, [api, initialDesign, onError, sessionId, starterArchive.archiveId]);
+  }, [
+    api,
+    initialDesign,
+    loadAssets,
+    onError,
+    sessionId,
+    starterArchive.archiveId
+  ]);
 
   const backgroundDesign = useMemo(
     () => design,
@@ -595,12 +635,22 @@ export function WatchfaceEditor({
   );
   const previewWidth = previewResolution?.width ?? 800;
   const previewHeight = previewResolution?.height ?? previewWidth;
-  const watchCoordinateResolution = useMemo(
-    () => details?.resolutions.reduce((smallest, resolution) =>
-      resolution.width < smallest.width ? resolution : smallest
-    ) ?? null,
-    [details]
+  const watchPreviewResolution = useMemo(
+    () => previewDetails?.resolutions.find(
+      (resolution) => resolution.directory === watchPreviewDirectory
+    ) ?? (previewDetails ? pickWatchPreviewResolution(previewDetails) : null),
+    [previewDetails, watchPreviewDirectory]
   );
+  const renderedPreviewDetails = useMemo(
+    () => previewDetails && watchPreviewResolution
+      ? detailsForPreviewResolution(
+          previewDetails,
+          watchPreviewResolution.directory
+        )
+      : previewDetails,
+    [previewDetails, watchPreviewResolution]
+  );
+  const watchCoordinateResolution = watchPreviewResolution;
   const watchCoordinateWidth = watchCoordinateResolution?.width ?? previewWidth;
   const watchCoordinateHeight = watchCoordinateResolution?.height ?? previewWidth;
   const watchCoordinateScale = previewWidth > 0
@@ -610,6 +660,21 @@ export function WatchfaceEditor({
     Math.round(value * watchCoordinateScale);
   const fromWatchCoordinate = (value: number) =>
     value / watchCoordinateScale;
+
+  useEffect(() => {
+    setWatchPreviewDirectory("");
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!previewDetails) return;
+    setWatchPreviewDirectory((current) =>
+      previewDetails.resolutions.some(
+        (resolution) => resolution.directory === current
+      )
+        ? current
+        : pickWatchPreviewResolution(previewDetails)?.directory ?? ""
+    );
+  }, [previewDetails]);
   const layoutLimits = useMemo(() => {
     const base = designDetails
       ? pickPreviewResolution(designDetails.styledMetricDetails)
@@ -889,7 +954,13 @@ export function WatchfaceEditor({
     const frame = document.createElement("canvas");
     frame.width = PREVIEW_SIZE;
     frame.height = PREVIEW_SIZE;
-    const frameDetails = deriveDesignDetails(details, frameDesign).previewDetails;
+    const allFrameDetails = deriveDesignDetails(details, frameDesign).previewDetails;
+    const frameDetails = watchPreviewResolution
+      ? detailsForPreviewResolution(
+          allFrameDetails,
+          watchPreviewResolution.directory
+        )
+      : allFrameDetails;
     const frameBackground = await renderDesignBackground(
       frameDesign,
       previewWidth
@@ -1138,12 +1209,12 @@ export function WatchfaceEditor({
   // this path only reconciles the full face after a gesture ends.
   useEffect(() => {
     const canvas = previewCanvasRef.current;
-    if (!canvas || !previewDetails || !backgroundDataUrl) return;
+    if (!canvas || !renderedPreviewDetails || !backgroundDataUrl) return;
     queuePreviewRender({
       canvas,
       sessionId,
       backgroundDataUrl,
-      details: previewDetails,
+      details: renderedPreviewDetails,
       options: studioOptions,
       weather: design.weatherIndicator,
       previewWidth,
@@ -1151,7 +1222,7 @@ export function WatchfaceEditor({
       dragCommitId: dragVisualRef.current?.awaitingCommitId ?? null
     });
   }, [
-    previewDetails,
+    renderedPreviewDetails,
     backgroundDataUrl,
     studioOptions,
     design.weatherIndicator,
@@ -2184,11 +2255,45 @@ export function WatchfaceEditor({
     }
     setCreating(true);
     try {
+      const archivePreview = document.createElement("canvas");
+      archivePreview.width = 800;
+      archivePreview.height = 800;
+      const [composition] = await Promise.all([
+        composeWatchfaceReplacements(details, design, loadAssets),
+        drawStudioPreview(
+          archivePreview,
+          backgroundDataUrl,
+          renderedPreviewDetails ?? previewDetails ?? details,
+          studioOptions,
+          loadAssets
+        )
+      ]);
       const { assetReplacements, configOverrides, minWatchFaceVersion } =
-        await composeWatchfaceReplacements(details, design, loadAssets);
+        composition;
+      if (design.weatherIndicator?.enabled) {
+        const url = weatherPreviewUrl(previewWidth);
+        if (url) {
+          const image = await loadStudioImage(url);
+          const context = archivePreview.getContext("2d");
+          const scale = archivePreview.width / previewWidth;
+          context?.drawImage(
+            image,
+            design.weatherIndicator.x * scale,
+            design.weatherIndicator.y * scale,
+            image.naturalWidth * design.weatherIndicator.scale * scale,
+            image.naturalHeight * design.weatherIndicator.scale * scale
+          );
+        }
+      }
       const archive = await api.createCorosWatchfaceArchive({
         sourceArchiveId: starterArchive.archiveId,
         backgroundDataUrl,
+        previewDataUrl: archivePreview.toDataURL("image/png"),
+        ...(targetFirmwareType ? { firmwareType: targetFirmwareType } : {}),
+        ...(targetWatchModel ? { watchModel: targetWatchModel } : {}),
+        ...(design.archiveWatchFaceVersion !== undefined
+          ? { watchFaceVersion: design.archiveWatchFaceVersion }
+          : {}),
         ...(assetReplacements.length > 0 ? { assetReplacements } : {}),
         ...(configOverrides.length > 0 ? { configOverrides } : {}),
         ...(minWatchFaceVersion !== undefined ? { minWatchFaceVersion } : {})
@@ -2219,6 +2324,7 @@ export function WatchfaceEditor({
         ...(projectId ? { projectId } : {}),
         name,
         sourceArchiveId: starterArchive.archiveId,
+        ...(targetFirmwareType ? { firmwareType: targetFirmwareType } : {}),
         design
       });
       setProjectId(saved.projectId);
@@ -2565,6 +2671,31 @@ export function WatchfaceEditor({
               <button type="button" aria-label="Zoom out" onClick={() => setStageZoom((zoom) => Math.max(0.6, (zoom === "fit" ? 1 : zoom) - 0.1))}>-</button>
               <button type="button" aria-label="Zoom in" onClick={() => setStageZoom((zoom) => Math.min(1.4, (zoom === "fit" ? 1 : zoom) + 0.1))}>+</button>
             </div>
+            {previewDetails && previewDetails.resolutions.length > 1 ? (
+              <label className="wf-preview-resolution">
+                Watch preview
+                <select
+                  value={watchPreviewResolution?.directory ?? ""}
+                  onChange={(event) => setWatchPreviewDirectory(event.target.value)}
+                >
+                  {[...previewDetails.resolutions]
+                    .sort((left, right) => left.width - right.width)
+                    .map((resolution) => (
+                      <option key={resolution.directory} value={resolution.directory}>
+                        {resolution.width === 240 &&
+                        (targetWatchModel === "apex-4" || targetFirmwareType?.toUpperCase() === "COROS W541")
+                          ? "APEX 4 42 mm · 240×240"
+                          : resolution.width === 260 &&
+                              (targetWatchModel === "apex-4" || targetFirmwareType?.toUpperCase() === "COROS W541")
+                            ? "APEX 4 46 mm · 260×260"
+                            : resolution.width === 800
+                              ? "Master · 800×800"
+                              : `${resolution.width}×${resolution.height}`}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            ) : null}
             <div className="wf-placement-menu" ref={placementMenuRef}>
               <button
                 className={`wf-placement-trigger${
@@ -2699,7 +2830,7 @@ export function WatchfaceEditor({
             <span className={snapStatus ? "is-snap-status" : undefined}>
               {snapStatus ?? (selectedElement ? backgroundElementLabel(selectedElement) : selectedLayer?.label ?? "No selection")}
             </span>
-            <span>{watchCoordinateWidth} × {watchCoordinateHeight}</span>
+            <span>{watchCoordinateWidth} × {watchCoordinateHeight} preview</span>
             <span>{starterArchive.fileName}</span>
           </div>
         </main>
@@ -2720,6 +2851,31 @@ export function WatchfaceEditor({
               <p className="watchface-editor-pane-title">Properties</p>
               <strong>{selectedElement ? backgroundElementLabel(selectedElement) : selectedLayer?.label ?? "Inspector"}</strong>
             </div>
+          </div>
+          <div className="watchface-inspector-group wf-archive-settings">
+            <h3 className="wf-inspector-heading">Archive</h3>
+            <label className="field">
+              Watch-face version
+              <input
+                type="number"
+                min="0"
+                max="999"
+                step="1"
+                placeholder={`Auto (template v${starterArchive.watchFaceVersion})`}
+                value={design.archiveWatchFaceVersion ?? ""}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  patchDesign({
+                    archiveWatchFaceVersion:
+                      value === "" ? undefined : Number(value)
+                  });
+                }}
+              />
+            </label>
+            <p className="wf-archive-note">
+              Leave blank to preserve the template version and automatically
+              raise it only when selected features require a newer version.
+            </p>
           </div>
           {selectedElement ? renderElementInspector(selectedElement) : selectedLayer ? renderInspector(selectedLayer) : null}
         </aside>

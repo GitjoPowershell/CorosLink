@@ -13,12 +13,14 @@ interface BatteryHistoryPanelProps {
   api: CorosLinkApi;
   disabled: boolean;
   authenticated?: boolean;
+  onFirmwareTypeDetected?: (firmwareType: string) => void;
 }
 
 export function BatteryHistoryPanel({
   api,
   disabled,
-  authenticated = true
+  authenticated = true,
+  onFirmwareTypeDetected
 }: BatteryHistoryPanelProps) {
   const [devices, setDevices] = useState<CorosPairedDevice[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
@@ -61,6 +63,12 @@ export function BatteryHistoryPanel({
       setError(null);
     }
   }, [authenticated, loadDevices]);
+
+  useEffect(() => {
+    if (selectedDevice) {
+      onFirmwareTypeDetected?.(selectedDevice.firmwareType);
+    }
+  }, [onFirmwareTypeDetected, selectedDevice]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

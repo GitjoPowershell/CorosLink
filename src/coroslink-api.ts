@@ -99,6 +99,7 @@ import type {
   CorosWatchfaceProjectSummary,
   CorosWatchfacePublishInput,
   CorosWatchfaceRegion,
+  CorosWatchfaceShareImport,
   CorosWatchfaceShareLink,
   CorosWatchfaceStatus,
   CorosWatchfaceTemplateAsset,
@@ -140,6 +141,9 @@ export interface CorosLinkApi {
   downloadCorosWatchfaceTheme: (
     input: CorosWatchfaceThemeDownloadInput
   ) => Promise<CorosWatchfaceThemeDownload>;
+  importCorosWatchfaceShareLink: (
+    shareUrl: string
+  ) => Promise<CorosWatchfaceShareImport>;
   chooseCorosWatchfaceArchive: () => Promise<CorosWatchfaceArchive | null>;
   chooseLegacy614aCarrier: () => Promise<CorosLegacy614aCarrierSelection | null>;
   exportLegacy614aCarrier: (

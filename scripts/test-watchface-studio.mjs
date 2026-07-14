@@ -17,14 +17,17 @@ import {
   computeLayoutGroupBounds,
   computeLayoutOffsetLimits,
   corosWeekdayIndex,
+  detailsForPreviewResolution,
   getAvailableComplications,
   getAmPmCapability,
   getFixedMetricCapabilities,
+  getTemplateBackgroundAssetPaths,
   inferStaticSeparators,
   loadStudioImage,
   mergeAssetReplacements,
   mergeConfigOverrides,
   normalizeRasterFontGlyphs,
+  pickWatchPreviewResolution,
   rasterFontSupportsText,
   rebaseNegativeControlChildren,
   scaleConfigRectValue
@@ -163,6 +166,48 @@ function resolution(width, digitWidth, digitHeight) {
     ]
   };
 }
+
+const apexPreviewDetails = {
+  archiveId: "apex-preview",
+  resolutions: [
+    resolution(240, 7, 11),
+    resolution(260, 8, 12),
+    resolution(280, 9, 13),
+    resolution(800, 24, 38)
+  ]
+};
+assert.equal(
+  pickWatchPreviewResolution(apexPreviewDetails)?.width,
+  260,
+  "240/260/800 MIP bundles should preview the APEX 4 46 mm tree by default"
+);
+assert.deepEqual(
+  detailsForPreviewResolution(apexPreviewDetails, "watchface_240x240")
+    .resolutions.map(({ width }) => width),
+  [240],
+  "Studio should be able to render one physical watch tree without changing the master"
+);
+assert.equal(
+  pickWatchPreviewResolution({
+    archiveId: "amoled-preview",
+    resolutions: [resolution(416, 12, 20), resolution(800, 24, 38)]
+  })?.width,
+  416,
+  "AMOLED bundles should preview the physical 416px tree instead of the 800px master"
+);
+
+assert.deepEqual(
+  getTemplateBackgroundAssetPaths({
+    archiveId: "fixture",
+    resolutions: [resolution(416, 12, 20), resolution(800, 24, 38)]
+  }),
+  [
+    "watchface_800x800/background.png",
+    "watchface_800x800/watchface_customize.png",
+    "watchface_customize.png"
+  ],
+  "Studio should initialize imported artwork from the largest on-watch background"
+);
 
 const details = {
   archiveId: "fixture",

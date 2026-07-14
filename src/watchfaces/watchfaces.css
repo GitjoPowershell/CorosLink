@@ -1818,6 +1818,46 @@
   line-height: 1.55;
 }
 
+.watchface-shell .watchface-import-dialog {
+  width: min(520px, 100%);
+}
+
+.watchface-shell .watchface-import-file {
+  width: 100%;
+  min-height: 46px;
+  justify-content: center;
+  margin-top: 22px;
+}
+
+.watchface-shell .watchface-import-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.watchface-shell .watchface-import-divider::before,
+.watchface-shell .watchface-import-divider::after {
+  height: 1px;
+  flex: 1;
+  background: var(--wf-border);
+  content: "";
+}
+
+.watchface-shell .watchface-import-link-form {
+  display: grid;
+  gap: 14px;
+}
+
+.watchface-shell .watchface-import-link-form > .primary-button {
+  justify-self: end;
+}
+
 .watchface-shell .watchface-share-result {
   display: grid;
   grid-template-columns: 180px minmax(0, 1fr);
@@ -2454,6 +2494,13 @@
   line-height: 1.45;
 }
 
+.watchface-shell .wf-archive-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
 .watchface-shell .wf-stage-status .is-snap-status {
   color: var(--accent-strong);
   font-weight: 720;
@@ -2514,6 +2561,25 @@
 
 .watchface-shell .watchface-preview-stack {
   position: relative;
+}
+
+.watchface-shell .wf-preview-resolution {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.watchface-shell .wf-preview-resolution select {
+  min-height: 32px;
+  max-width: 220px;
+  border: 1px solid var(--wf-border);
+  border-radius: 8px;
+  padding: 0 28px 0 10px;
+  color: var(--text-primary);
+  background: var(--wf-surface);
 }
 
 .watchface-shell .watchface-editor-device.is-fit {

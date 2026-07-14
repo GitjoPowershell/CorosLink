@@ -49,6 +49,11 @@ export type WatchModelId =
   | "apex-pro"
   | "apex";
 
+export type CorosWatchfaceResolutionProfile =
+  | "mip-240-260-800"
+  | "amoled-416-800"
+  | "other";
+
 export type WatchConnectionSmokeOptionId =
   | "auto"
   | "none"
@@ -222,6 +227,20 @@ export interface CorosWatchfaceArchive {
   /** Decimal text: official template IDs exceed Number.MAX_SAFE_INTEGER. */
   sourceTemplateId: string;
   diyVersion: number;
+  /** Effective `o_wf_ver` declared by info.json (defaults to 0 when absent). */
+  watchFaceVersion: number;
+  /** Target firmware family retained from template selection/import. */
+  firmwareType?: string;
+  /** Detected from resolution folders, independent of COROS's firmware ID. */
+  resolutionProfile: CorosWatchfaceResolutionProfile;
+}
+
+/** A public COROS share page downloaded and registered as a Studio archive. */
+export interface CorosWatchfaceShareImport {
+  archive: CorosWatchfaceArchive;
+  name: string;
+  /** Firmware recorded by COROS for the shared face, when present. */
+  firmwareType?: string;
 }
 
 export interface CorosWatchfacePublishInput {
@@ -236,6 +255,14 @@ export interface CorosWatchfacePublishInput {
 export interface CorosWatchfaceCreatorInput {
   sourceArchiveId: string;
   backgroundDataUrl: string;
+  /** Fully composed face preview written to the archive's root preview PNG. */
+  previewDataUrl?: string;
+  /** Target firmware used to validate that required device resolutions exist. */
+  firmwareType?: string;
+  /** Connected watch model, used when firmware identifiers change over time. */
+  watchModel?: WatchModelId;
+  /** Exact `o_wf_ver` to write. Omit to preserve/auto-raise the template value. */
+  watchFaceVersion?: number;
   /**
    * Renderer-generated PNG sprites (bitmap-font digits, tinted icons and
    * weekday labels) that replace template assets of identical size.
@@ -330,6 +357,8 @@ export interface CorosWatchfaceThemeDownloadInput {
   packageUrl: string;
   /** Display name used for the downloaded archive, usually the theme name. */
   name?: string;
+  /** Firmware family used to query the catalog that returned this template. */
+  firmwareType?: string;
 }
 
 export interface CorosWatchfaceTemplateAsset extends CorosWatchfaceSpriteFile {
@@ -455,6 +484,8 @@ export type CorosWatchfaceBackgroundElement =
 
 export interface CorosWatchfaceDesignState {
   version: 1;
+  /** Exact archive `o_wf_ver`; absent keeps automatic compatibility behavior. */
+  archiveWatchFaceVersion?: number;
   /**
    * Retained only so projects saved by older releases can still be opened.
    * The editor no longer paints a solid base colour behind the face.
@@ -531,12 +562,15 @@ export interface CorosWatchfaceProjectSummary {
   updatedAt: string;
   /** Decimal text: official template IDs exceed Number.MAX_SAFE_INTEGER. */
   sourceTemplateId: string;
+  /** Firmware family the project's starter template was selected for. */
+  firmwareType?: string;
 }
 
 export interface CorosWatchfaceProjectSaveInput {
   projectId?: string;
   name: string;
   sourceArchiveId: string;
+  firmwareType?: string;
   design: CorosWatchfaceDesignState;
 }
 

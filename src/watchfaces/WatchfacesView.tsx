@@ -1,6 +1,7 @@
 import {
   type CSSProperties,
   type FormEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -36,10 +37,15 @@ import type {
   CorosWatchfaceTheme,
   CorosWatchfaceThemeCatalog,
   CorosWatchfaceTemplateAsset,
+  WatchModelId,
   WatchStatus
 } from "../../electron/types";
 import type { CorosLinkApi } from "../coroslink-api";
-import { getWatchPresentation } from "../watchModels";
+import {
+  getWatchPresentation,
+  getWatchfaceDeviceProfile,
+  getWatchfaceDeviceProfileByFirmware
+} from "../watchModels";
 import { BatteryHistoryPanel } from "./BatteryHistoryPanel";
 import { DeviceInfoPanel } from "./DeviceInfoPanel";
 import { LegacyCarrierEditorPanel } from "./LegacyCarrierEditorPanel";
@@ -50,8 +56,10 @@ import { deriveDesignDetails, toStudioOptions } from "./watchfaceCompose";
 import { createWatchfaceEditorSessionId } from "./watchfaceEditorHistory";
 import {
   drawStudioPreview,
+  detailsForPreviewResolution,
   loadStudioImage,
-  pickPreviewResolution
+  pickPreviewResolution,
+  pickWatchPreviewResolution
 } from "./watchfaceStudio";
 import { weatherPreviewUrl } from "./weatherAssets";
 import arcFace from "../assets/watchfaces/arc.png";
@@ -105,6 +113,8 @@ interface StudioSession {
   archive: CorosWatchfaceArchive;
   project?: CorosWatchfaceProject;
   initialName: string;
+  targetFirmwareType: string;
+  targetWatchModel?: WatchModelId;
 }
 
 const DEFAULT_FIRMWARE_TYPE = "COROS W332";
@@ -150,6 +160,8 @@ export function WatchfacesView({ api, showDevelopmentTools, watchStatus }: Watch
 
   const [builtArchive, setBuiltArchive] =
     useState<CorosWatchfaceArchive | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importShareUrl, setImportShareUrl] = useState("");
   const [publishOpen, setPublishOpen] = useState(false);
   const [publishName, setPublishName] = useState("");
   const [shareLink, setShareLink] = useState<CorosWatchfaceShareLink | null>(null);
@@ -159,6 +171,39 @@ export function WatchfacesView({ api, showDevelopmentTools, watchStatus }: Watch
   >(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const applyDetectedFirmwareType = useCallback((nextFirmwareType: string) => {
+    const normalized = nextFirmwareType.trim();
+    if (!normalized) return;
+    const profile = getWatchfaceDeviceProfileByFirmware(normalized);
+    setFirmwareType(normalized);
+    setModelVersion(profile?.modelVersion ?? "");
+    setThemes([]);
+    setThemesLoaded(false);
+  }, []);
+
+  useEffect(() => {
+    if (!watchStatus?.connected) return;
+    const profile = getWatchfaceDeviceProfile(watchStatus.model);
+    if (profile) {
+      applyDetectedFirmwareType(profile.firmwareType);
+    }
+  }, [applyDetectedFirmwareType, watchStatus?.connected, watchStatus?.model]);
+
+  const handlePairedFirmwareTypeDetected = useCallback(
+    (nextFirmwareType: string) => {
+      // A physically connected watch is the strongest signal. Do not let the
+      // first account-profile device switch an attached APEX 4 back to W332.
+      if (
+        watchStatus?.connected &&
+        getWatchfaceDeviceProfile(watchStatus.model)
+      ) {
+        return;
+      }
+      applyDetectedFirmwareType(nextFirmwareType);
+    },
+    [applyDetectedFirmwareType, watchStatus?.connected, watchStatus?.model]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -288,13 +333,23 @@ export function WatchfacesView({ api, showDevelopmentTools, watchStatus }: Watch
     initialName: string,
     project?: CorosWatchfaceProject
   ) {
+    const targetFirmwareType =
+      archive.firmwareType?.trim() || project?.firmwareType?.trim() || firmwareType;
+    const targetWatchModel = watchStatus?.connected
+      ? watchStatus.model
+      : undefined;
+    applyDetectedFirmwareType(targetFirmwareType);
     setStudioSession({
       id: createWatchfaceEditorSessionId(project?.projectId ?? archive.archiveId),
       archive,
       project,
-      initialName: initialName.trim() || "Untitled watch face"
+      initialName: initialName.trim() || "Untitled watch face",
+      targetFirmwareType,
+      ...(targetWatchModel ? { targetWatchModel } : {})
     });
     setBuiltArchive(null);
+    setImportOpen(false);
+    setImportShareUrl("");
     setShareLink(null);
     setPublishOpen(false);
     setSurface("studio");
@@ -319,6 +374,26 @@ export function WatchfacesView({ api, showDevelopmentTools, watchStatus }: Watch
         selected,
         selected.fileName.replace(/\.(zip|dat)$/i, "") || "Custom watch face"
       );
+    } catch (caught) {
+      setError(toErrorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleImportShareLink(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const shareUrl = importShareUrl.trim();
+    if (!shareUrl) {
+      setError("Paste a COROS watch-face share link.");
+      setNotice(null);
+      return;
+    }
+    setBusy("archive");
+    clearMessages();
+    try {
+      const imported = await api.importCorosWatchfaceShareLink(shareUrl);
+      openStudio(imported.archive, imported.name);
     } catch (caught) {
       setError(toErrorMessage(caught));
     } finally {
@@ -362,7 +437,8 @@ export function WatchfacesView({ api, showDevelopmentTools, watchStatus }: Watch
       projectId: saved.projectId,
       name: saved.name,
       updatedAt: saved.updatedAt,
-      sourceTemplateId: saved.sourceTemplateId
+      sourceTemplateId: saved.sourceTemplateId,
+      ...(saved.firmwareType ? { firmwareType: saved.firmwareType } : {})
     };
     setProjects((current) => [
       summary,
@@ -406,7 +482,8 @@ export function WatchfacesView({ api, showDevelopmentTools, watchStatus }: Watch
     try {
       const download = await api.downloadCorosWatchfaceTheme({
         packageUrl: theme.packageUrl,
-        name: theme.name
+        name: theme.name,
+        firmwareType: theme.firmwareType?.trim() || firmwareType
       });
       if (download.usableAsTemplate && download.archive) {
         openStudio(download.archive, theme.name);
@@ -428,6 +505,9 @@ export function WatchfacesView({ api, showDevelopmentTools, watchStatus }: Watch
 
   function openPublish(archive: CorosWatchfaceArchive, currentName: string) {
     setBuiltArchive(archive);
+    if (archive.firmwareType) {
+      setFirmwareType(archive.firmwareType);
+    }
     setPublishName(currentName.trim() || studioSession?.initialName || "Untitled watch face");
     setShareLink(null);
     setPublishOpen(true);
@@ -490,6 +570,8 @@ export function WatchfacesView({ api, showDevelopmentTools, watchStatus }: Watch
           api={api}
           sessionId={studioSession.id}
           starterArchive={studioSession.archive}
+          targetFirmwareType={studioSession.targetFirmwareType}
+          targetWatchModel={studioSession.targetWatchModel}
           initialDesign={studioSession.project?.design}
           initialProjectId={studioSession.project?.projectId}
           initialProjectName={studioSession.project?.name ?? studioSession.initialName}
@@ -552,7 +634,7 @@ export function WatchfacesView({ api, showDevelopmentTools, watchStatus }: Watch
           importing={busy === "archive"}
           onConnect={() => setSurface("sign-in")}
           onDisconnect={() => void handleLogout()}
-          onImport={() => void handleChooseArchive()}
+          onImport={() => setImportOpen(true)}
           onCreate={() => setHubTab("templates")}
         />
       ) : null}
@@ -685,10 +767,11 @@ export function WatchfacesView({ api, showDevelopmentTools, watchStatus }: Watch
               disabled={busy !== null}
               openingProject={busy === "project"}
               accountConnected={connected}
+              onFirmwareTypeDetected={handlePairedFirmwareTypeDetected}
               onOpen={(project) => void handleLoadProject(project.projectId)}
               onDelete={setDeleteTarget}
               onCreate={() => setHubTab("templates")}
-              onImport={() => void handleChooseArchive()}
+              onImport={() => setImportOpen(true)}
             />
           ) : (
             <TemplatesPanel
@@ -709,7 +792,7 @@ export function WatchfacesView({ api, showDevelopmentTools, watchStatus }: Watch
                 setThemes([]);
                 setThemesLoaded(false);
               }}
-              onFirmwareTypeChange={setFirmwareType}
+              onFirmwareTypeChange={applyDetectedFirmwareType}
               onLanguageChange={setLanguage}
               onMaxVersionChange={setMaxWatchFaceVersion}
               onWatchSerialChange={setWatchSerial}
@@ -728,6 +811,16 @@ export function WatchfacesView({ api, showDevelopmentTools, watchStatus }: Watch
           busy={busy === "project"}
           onCancel={() => setDeleteTarget(null)}
           onConfirm={() => void handleDeleteProject()}
+        />
+      ) : null}
+      {importOpen ? (
+        <ImportWatchfaceDialog
+          shareUrl={importShareUrl}
+          busy={busy === "archive"}
+          onShareUrlChange={setImportShareUrl}
+          onChooseArchive={() => void handleChooseArchive()}
+          onSubmit={handleImportShareLink}
+          onClose={() => setImportOpen(false)}
         />
       ) : null}
     </div>
@@ -999,6 +1092,7 @@ interface ProjectsDashboardProps {
   disabled: boolean;
   openingProject: boolean;
   accountConnected: boolean;
+  onFirmwareTypeDetected: (firmwareType: string) => void;
   onOpen: (project: CorosWatchfaceProjectSummary) => void;
   onDelete: (project: CorosWatchfaceProjectSummary) => void;
   onCreate: () => void;
@@ -1013,6 +1107,7 @@ function ProjectsDashboard({
   disabled,
   openingProject,
   accountConnected,
+  onFirmwareTypeDetected,
   onOpen,
   onDelete,
   onCreate,
@@ -1079,6 +1174,7 @@ function ProjectsDashboard({
         api={api}
         disabled={disabled}
         authenticated={accountConnected}
+        onFirmwareTypeDetected={onFirmwareTypeDetected}
       />
     </div>
   );
@@ -1344,7 +1440,10 @@ function WatchFacePreview({
         loadedProject.design
       ).previewDetails;
       const resolution = pickPreviewResolution(previewDetails);
-      if (!resolution) throw new Error("This project has no preview resolution.");
+      const watchResolution = pickWatchPreviewResolution(previewDetails);
+      if (!resolution || !watchResolution) {
+        throw new Error("This project has no preview resolution.");
+      }
       const backgroundDataUrl = await renderDesignBackground(
         loadedProject.design,
         resolution.width
@@ -1370,7 +1469,10 @@ function WatchFacePreview({
       await drawStudioPreview(
         canvas,
         backgroundDataUrl,
-        previewDetails,
+        detailsForPreviewResolution(
+          previewDetails,
+          watchResolution.directory
+        ),
         toStudioOptions(loadedProject.design),
         loadAssets
       );
@@ -1929,6 +2031,91 @@ function ConfirmDeleteDialog({
             Delete project
           </button>
         </div>
+      </section>
+    </div>
+  );
+}
+
+function ImportWatchfaceDialog({
+  shareUrl,
+  busy,
+  onShareUrlChange,
+  onChooseArchive,
+  onSubmit,
+  onClose
+}: {
+  shareUrl: string;
+  busy: boolean;
+  onShareUrlChange: (value: string) => void;
+  onChooseArchive: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="watchface-modal-backdrop" role="presentation">
+      <section
+        className="watchface-modal watchface-import-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="watchface-import-title"
+        aria-describedby="watchface-import-description"
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && !busy) onClose();
+        }}
+      >
+        <button
+          className="icon-button watchface-modal-close"
+          type="button"
+          aria-label="Close import dialog"
+          disabled={busy}
+          onClick={onClose}
+        >
+          <X size={17} aria-hidden="true" />
+        </button>
+        <h2 id="watchface-import-title">Import watch face</h2>
+        <p id="watchface-import-description">
+          Open a local DIY archive or paste an official COROS watch-face share link.
+        </p>
+
+        <button
+          className="secondary-button watchface-import-file"
+          type="button"
+          disabled={busy}
+          onClick={onChooseArchive}
+        >
+          <Upload size={16} aria-hidden="true" />
+          Choose ZIP or DAT archive
+        </button>
+
+        <div className="watchface-import-divider" aria-hidden="true">
+          <span>or import from COROS</span>
+        </div>
+
+        <form className="watchface-import-link-form" onSubmit={onSubmit}>
+          <label className="field">
+            COROS share link
+            <input
+              type="url"
+              value={shareUrl}
+              placeholder="https://faq.coros.com/share/watchface?..."
+              disabled={busy}
+              onChange={(event) => onShareUrlChange(event.target.value)}
+              autoFocus
+            />
+          </label>
+          <button
+            className="primary-button"
+            type="submit"
+            disabled={busy || !shareUrl.trim()}
+          >
+            {busy ? (
+              <Loader2 className="spin" size={16} aria-hidden="true" />
+            ) : (
+              <Download size={16} aria-hidden="true" />
+            )}
+            Import into Studio
+          </button>
+        </form>
       </section>
     </div>
   );

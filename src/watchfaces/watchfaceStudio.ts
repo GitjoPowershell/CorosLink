@@ -2482,7 +2482,7 @@ export function applyLayoutToDetails(
   };
 }
 
-/** The resolution used for the on-screen preview: the largest one present. */
+/** The master resolution used for authoring and proportional config changes. */
 export function pickPreviewResolution(
   details: CorosWatchfaceTemplateDetails
 ): CorosWatchfaceResolutionDetails | null {
@@ -2490,6 +2490,56 @@ export function pickPreviewResolution(
     [...details.resolutions].sort((left, right) => right.width - left.width)[0] ??
     null
   );
+}
+
+/**
+ * The physical watch tree used for a device preview. COROS MIP bundles can
+ * contain 240, 260, 280 and 800px trees for several watches; APEX-style
+ * 240/260/800 bundles default to the 46 mm 260px target. The user can still
+ * switch to any other tree in Studio.
+ */
+export function pickWatchPreviewResolution(
+  details: CorosWatchfaceTemplateDetails
+): CorosWatchfaceResolutionDetails | null {
+  const resolutions = [...details.resolutions];
+  const widths = new Set(resolutions.map((resolution) => resolution.width));
+  if (widths.has(240) && widths.has(260) && widths.has(800)) {
+    return resolutions.find((resolution) => resolution.width === 260) ?? null;
+  }
+  const deviceResolutions = resolutions.filter(
+    (resolution) => resolution.width < 800 && resolution.height < 800
+  );
+  return (
+    deviceResolutions.sort((left, right) => right.width - left.width)[0] ??
+    pickPreviewResolution(details)
+  );
+}
+
+/** Restricts rendering helpers to one native device config without mutating it. */
+export function detailsForPreviewResolution(
+  details: CorosWatchfaceTemplateDetails,
+  directory: string
+): CorosWatchfaceTemplateDetails {
+  const resolution = details.resolutions.find(
+    (candidate) => candidate.directory === directory
+  );
+  return resolution ? { ...details, resolutions: [resolution] } : details;
+}
+
+/** Template artwork candidates, ordered from the on-watch image to previews. */
+export function getTemplateBackgroundAssetPaths(
+  details: CorosWatchfaceTemplateDetails
+): string[] {
+  const resolution = pickPreviewResolution(details);
+  return [
+    ...(resolution
+      ? [
+          `${resolution.directory}/background.png`,
+          `${resolution.directory}/watchface_customize.png`
+        ]
+      : []),
+    "watchface_customize.png"
+  ];
 }
 
 interface PreviewDigitSource {
