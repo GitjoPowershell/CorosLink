@@ -226,8 +226,9 @@ export function SettingsView({
           </button>
         </div>
         <p className="settings-sport-hint">
-          Color activities by sport in the training load heatmap. Each day uses
-          the color of its highest-load activity.
+          Color activities by sport across the app — the training load heatmap
+          and the calendar. In the heatmap, a day with one sport is a solid
+          cell; a day with several is split into a pie of sport colors.
         </p>
         <ul className="settings-sport-list">
           {SPORT_COLOR_CATEGORIES.map((cat) => (

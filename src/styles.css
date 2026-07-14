@@ -21957,6 +21957,25 @@ tr.data-intervals-row-missing {
   border-left-color: var(--accent-strong);
 }
 
+/* Completed-activity chips are tinted by sport, matching the training heatmap.
+   Two classes (.calendar-chip is always present) beat the single-class
+   activity/paired defaults above. */
+.calendar-chip.calendar-sport-strength {
+  border-left-color: var(--sport-strength);
+}
+.calendar-chip.calendar-sport-trail {
+  border-left-color: var(--sport-trail);
+}
+.calendar-chip.calendar-sport-run {
+  border-left-color: var(--sport-run);
+}
+.calendar-chip.calendar-sport-bike {
+  border-left-color: var(--sport-bike);
+}
+.calendar-chip.calendar-sport-other {
+  border-left-color: var(--sport-other);
+}
+
 .calendar-cat-easy { border-left-color: #5eb9f0; }
 .calendar-cat-long { border-left-color: #a78bfa; }
 .calendar-cat-intervals { border-left-color: #f0785e; }
