@@ -101,8 +101,16 @@ export function buildHeatmapSummary(cells: HeatmapCell[]): HeatmapSummary {
     0
   );
 
+  // Current streak counts consecutive active days ending at the most recent
+  // day. Today is still in progress, so an empty *today* does not break the
+  // streak — only a full rest day (yesterday) does. In other words the streak
+  // breaks only when both yesterday and today have no activity.
   let currentStreak = 0;
-  for (let index = cells.length - 1; index >= 0; index -= 1) {
+  let index = cells.length - 1;
+  if (index >= 0 && (cells[index].trainingLoad ?? 0) <= 0) {
+    index -= 1; // skip an empty, in-progress "today"
+  }
+  for (; index >= 0; index -= 1) {
     if ((cells[index].trainingLoad ?? 0) > 0) {
       currentStreak += 1;
     } else {
