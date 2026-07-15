@@ -2905,6 +2905,53 @@
   touch-action: none;
 }
 
+.watchface-shell .wf-sprite-transform {
+  position: absolute;
+  z-index: 3;
+  inset: 9px;
+  width: calc(100% - 18px);
+  height: calc(100% - 18px);
+  overflow: visible;
+  pointer-events: none;
+  touch-action: none;
+}
+
+.watchface-shell .wf-sprite-transform-box {
+  fill: color-mix(in srgb, var(--accent-strong) 10%, transparent);
+  stroke: var(--accent-strong);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.watchface-shell .wf-sprite-transform-stem {
+  stroke: var(--accent-strong);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.watchface-shell .wf-sprite-transform-handle {
+  fill: var(--wf-surface-raised);
+  stroke: var(--accent-strong);
+  stroke-width: 1.75;
+  vector-effect: non-scaling-stroke;
+  pointer-events: all;
+  cursor: nwse-resize;
+}
+
+.watchface-shell .wf-sprite-transform-handle:hover {
+  fill: var(--accent-strong);
+  stroke: var(--wf-surface-raised);
+}
+
+.watchface-shell .wf-sprite-transform-rotate {
+  cursor: grab;
+}
+
+.watchface-shell .wf-sprite-transform.is-locked .wf-sprite-transform-handle {
+  pointer-events: none;
+  opacity: 0.58;
+}
+
 .watchface-shell .watchface-preview-drag {
   position: absolute;
   inset: 9px;
@@ -3309,6 +3356,26 @@
 .watchface-shell .watchface-zoom-control > output {
   color: var(--accent-strong);
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.watchface-shell .watchface-sprite-transform-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.watchface-shell .watchface-sprite-transform-fields label {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.watchface-shell .watchface-sprite-transform-fields input {
+  min-width: 0;
   font-variant-numeric: tabular-nums;
 }
 

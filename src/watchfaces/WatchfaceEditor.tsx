@@ -233,6 +233,13 @@ import {
   type WatchfaceSnapGuide,
   type WatchfaceSnapTarget
 } from "./watchfaceEditorSnapping";
+import {
+  normalizeWatchfaceRotation,
+  resizeWatchfaceSprite,
+  rotateWatchfaceSprite,
+  type WatchfaceSpriteResizeHandle,
+  type WatchfaceSpriteTransform
+} from "./watchfaceSpriteTransform";
 
 interface WatchfaceEditorProps {
   api: CorosLinkApi;
@@ -252,7 +259,16 @@ interface WatchfaceEditorProps {
 }
 
 interface WatchfaceDragState {
-  kind: "layout" | "bgElement" | "sprite" | "staticSeparator" | "ampm" | "weather" | "selectorIcon";
+  kind:
+    | "layout"
+    | "bgElement"
+    | "sprite"
+    | "spriteResize"
+    | "spriteRotate"
+    | "staticSeparator"
+    | "ampm"
+    | "weather"
+    | "selectorIcon";
   targetId: string;
   startX: number;
   startY: number;
@@ -260,6 +276,12 @@ interface WatchfaceDragState {
   baseY: number;
   snapId: string;
   baseBounds: WatchfaceEditorBounds;
+  spriteTransform?: {
+    initial: WatchfaceSpriteTransform;
+    scale: number;
+    handle?: WatchfaceSpriteResizeHandle;
+    startPointer?: { x: number; y: number };
+  };
 }
 
 interface WatchfaceContextMenuState {
@@ -299,6 +321,28 @@ interface WatchfaceDragVisual {
   clipBounds: WatchfaceEditorBounds;
   preparationId: number;
   awaitingCommitId: number | null;
+  spriteTransform?: WatchfaceSpriteTransform & {
+    scaleX: number;
+    scaleY: number;
+    rotationDelta: number;
+  };
+}
+
+interface WatchfaceSpriteTransformDraft {
+  spriteId: string;
+  transform: WatchfaceSpriteTransform;
+}
+
+function isSpriteTransformDrag(
+  drag: WatchfaceDragState
+): drag is WatchfaceDragState & {
+  kind: "spriteResize" | "spriteRotate";
+  spriteTransform: NonNullable<WatchfaceDragState["spriteTransform"]>;
+} {
+  return (
+    (drag.kind === "spriteResize" || drag.kind === "spriteRotate") &&
+    drag.spriteTransform !== undefined
+  );
 }
 
 const PREVIEW_SIZE = 520;
@@ -516,6 +560,8 @@ export function WatchfaceEditor({
     );
   const [snapGuides, setSnapGuides] = useState<WatchfaceSnapGuide[]>([]);
   const [dragVisualActive, setDragVisualActive] = useState(false);
+  const [spriteTransformDraft, setSpriteTransformDraft] =
+    useState<WatchfaceSpriteTransformDraft | null>(null);
   const [contextMenu, setContextMenu] =
     useState<WatchfaceContextMenuState | null>(null);
 
@@ -988,6 +1034,26 @@ export function WatchfaceEditor({
     [configAssetReferences]
   );
   const selectedLayer = layers.find((layer) => layer.id === selectedId) ?? null;
+  const selectedSprite = selectedLayer?.kind === "customSprite" && selectedLayer.spriteId
+    ? (design.designSprites ?? []).find((sprite) => sprite.id === selectedLayer.spriteId) ?? null
+    : null;
+  const spriteTransform = selectedSprite
+    ? spriteTransformDraft?.spriteId === selectedSprite.id
+      ? spriteTransformDraft.transform
+      : {
+          x: selectedSprite.x,
+          y: selectedSprite.y,
+          width: selectedSprite.width * selectedSprite.scale,
+          height: selectedSprite.height * selectedSprite.scale,
+          rotation: selectedSprite.rotation
+        }
+    : null;
+  const selectedSpriteCanTransform = Boolean(
+    selectedLayer &&
+    selectedSprite &&
+    previewMode === "current" &&
+    !isMovementLockedForId(selectedLayer.id)
+  );
 
   useEffect(() => {
     setSelectedId(previewMode === "current" ? "background" : "");
@@ -1084,7 +1150,8 @@ export function WatchfaceEditor({
     watchPreviewResolution
   ]);
   const selectorIconTarget = useMemo(() => {
-    if (!previewDetails || !previewResolution) {
+    const resolution = watchPreviewResolution ?? previewResolution;
+    if (!previewDetails || !resolution) {
       return null;
     }
     const available = getAvailableComplications(previewDetails);
@@ -1094,7 +1161,7 @@ export function WatchfaceEditor({
     if (!complication) {
       return null;
     }
-    const config = previewResolution.config;
+    const config = resolution.config;
     const originKey = Object.keys(config).find((key) =>
       /^rect_control\d+_pos$/.test(key)
     );
@@ -1108,30 +1175,43 @@ export function WatchfaceEditor({
     const iconValue = config[`control_${complication.controlPrefix}_icon`]
       ?.replace(/\\/g, "/");
     const icon = iconValue
-      ? previewResolution.icons.find(
+      ? resolution.icons.find(
           (candidate) =>
-            candidate.path === `${previewResolution.directory}/${iconValue}`
+            candidate.path === `${resolution.directory}/${iconValue}`
         )
       : null;
     const stateFolderName = config[
       `control_${complication.controlPrefix}_icon_dir`
     ]?.replace(/\\/g, "/");
     const state = stateFolderName
-      ? previewResolution.spriteFolders.find(
+      ? resolution.spriteFolders.find(
           (folder) =>
             folder.kind === "state" && folder.folder === stateFolderName
         )?.files[0]
       : null;
-    const width = icon?.width ?? state?.width ?? Math.round(previewWidth * 0.05);
-    const height = icon?.height ?? state?.height ?? Math.round(previewWidth * 0.04);
+    const baseWidth = icon?.width ?? state?.width ?? Math.round(resolution.width * 0.05);
+    const baseHeight = icon?.height ?? state?.height ?? Math.round(resolution.width * 0.04);
+    // The preview frame is rendered from the selected watch's native tree,
+    // while the interaction overlay uses the largest template coordinate
+    // space. Convert the bitmap's native top-left bounds into that space so
+    // the box follows the pixels at every device resolution and scale.
+    const coordinateScale = previewWidth / resolution.width;
+    const x = (origin.x + position.x) * coordinateScale;
+    const y = (origin.y + position.y) * coordinateScale;
     return {
       complicationId: complication.id,
-      x0: origin.x + position.x,
-      y0: origin.y + position.y,
-      x1: origin.x + position.x + width,
-      y1: origin.y + position.y + height
+      x0: x,
+      y0: y,
+      x1: x + baseWidth * coordinateScale,
+      y1: y + baseHeight * coordinateScale
     };
-  }, [design.previewComplication, previewDetails, previewResolution, previewWidth]);
+  }, [
+    design.previewComplication,
+    previewDetails,
+    previewResolution,
+    previewWidth,
+    watchPreviewResolution
+  ]);
   const backgroundElements = design.backgroundElements ?? [];
   const activeBackgroundElements = previewMode === "current" ? backgroundElements : [];
   const previewBackgroundDataUrl = previewMode === "aod" && supportsAod
@@ -1308,6 +1388,7 @@ export function WatchfaceEditor({
       canvas.style.visibility = "hidden";
     }
     setDragVisualActive(false);
+    setSpriteTransformDraft(null);
   }
 
   function drawDragVisual() {
@@ -1333,33 +1414,55 @@ export function WatchfaceEditor({
     );
     context.clip();
     context.drawImage(visual.baseFrame, 0, 0, canvas.width, canvas.height);
-    context.translate(
-      visual.movement.dx * scaleX,
-      visual.movement.dy * scaleY
-    );
-    const x = visual.clipBounds.x0 * scaleX;
-    const y = visual.clipBounds.y0 * scaleY;
-    const width = (visual.clipBounds.x1 - visual.clipBounds.x0) * scaleX;
-    const height = (visual.clipBounds.y1 - visual.clipBounds.y0) * scaleY;
-    context.drawImage(
-      visual.movingFrame,
-      x,
-      y,
-      width,
-      height,
-      x,
-      y,
-      width,
-      height
-    );
+    const spriteTransform = visual.spriteTransform;
+    if (spriteTransform && isSpriteTransformDrag(visual.drag)) {
+      const centerX = spriteTransform.x * scaleX;
+      const centerY = spriteTransform.y * scaleY;
+      const baseCenterX = visual.drag.spriteTransform.initial.x * scaleX;
+      const baseCenterY = visual.drag.spriteTransform.initial.y * scaleY;
+      context.translate(centerX, centerY);
+      if (visual.drag.kind === "spriteResize") {
+        const baseRotation = (visual.drag.spriteTransform.initial.rotation * Math.PI) / 180;
+        context.rotate(baseRotation);
+        context.scale(spriteTransform.scaleX, spriteTransform.scaleY);
+        context.rotate(-baseRotation);
+      } else {
+        context.rotate((spriteTransform.rotationDelta * Math.PI) / 180);
+      }
+      context.translate(-baseCenterX, -baseCenterY);
+      // The isolated moving frame contains only this sprite. Transforming the
+      // full transparent frame avoids clipping an image while it is rotated.
+      context.drawImage(visual.movingFrame, 0, 0, canvas.width, canvas.height);
+    } else {
+      context.translate(
+        visual.movement.dx * scaleX,
+        visual.movement.dy * scaleY
+      );
+      const x = visual.clipBounds.x0 * scaleX;
+      const y = visual.clipBounds.y0 * scaleY;
+      const width = (visual.clipBounds.x1 - visual.clipBounds.x0) * scaleX;
+      const height = (visual.clipBounds.y1 - visual.clipBounds.y0) * scaleY;
+      context.drawImage(
+        visual.movingFrame,
+        x,
+        y,
+        width,
+        height,
+        x,
+        y,
+        width,
+        height
+      );
+    }
     context.restore();
 
     const primaryId = visual.drag.kind === "selectorIcon"
       ? "complication"
       : visual.drag.snapId;
-    const linkedBounds = (design.linkedLayerGroups?.find((group) =>
-      group.includes(primaryId)
-    ) ?? [primaryId])
+    const movedIds = isSpriteTransformDrag(visual.drag)
+      ? [primaryId]
+      : design.linkedLayerGroups?.find((group) => group.includes(primaryId)) ?? [primaryId];
+    const linkedBounds = movedIds
       .map(selectionBoundsForId)
       .filter((box): box is WatchfaceEditorBounds => Boolean(box));
     const baseBounds = linkedBounds.length > 1
@@ -1370,20 +1473,22 @@ export function WatchfaceEditor({
           y1: Math.max(result.y1, box.y1)
         }))
       : visual.drag.baseBounds;
-    const bounds = translateWatchfaceBounds(
-      baseBounds,
-      visual.movement.dx,
-      visual.movement.dy
-    );
-    context.strokeStyle = "rgba(81, 224, 181, 0.95)";
-    context.lineWidth = 2;
-    context.setLineDash([]);
-    context.strokeRect(
-      bounds.x0 * scaleX,
-      bounds.y0 * scaleY,
-      (bounds.x1 - bounds.x0) * scaleX,
-      (bounds.y1 - bounds.y0) * scaleY
-    );
+    if (!spriteTransform) {
+      const bounds = translateWatchfaceBounds(
+        baseBounds,
+        visual.movement.dx,
+        visual.movement.dy
+      );
+      context.strokeStyle = "rgba(81, 224, 181, 0.95)";
+      context.lineWidth = 2;
+      context.setLineDash([]);
+      context.strokeRect(
+        bounds.x0 * scaleX,
+        bounds.y0 * scaleY,
+        (bounds.x1 - bounds.x0) * scaleX,
+        (bounds.y1 - bounds.y0) * scaleY
+      );
+    }
     canvas.style.visibility = "visible";
   }
 
@@ -1393,9 +1498,9 @@ export function WatchfaceEditor({
     clipBounds: WatchfaceEditorBounds;
   } {
     const primaryId = drag.kind === "selectorIcon" ? "complication" : drag.snapId;
-    const movingIds = design.linkedLayerGroups?.find((group) =>
-      group.includes(primaryId)
-    ) ?? [primaryId];
+    const movingIds = isSpriteTransformDrag(drag)
+      ? [primaryId]
+      : design.linkedLayerGroups?.find((group) => group.includes(primaryId)) ?? [primaryId];
     const movingIdSet = new Set(movingIds);
     const movingElementIds = new Set(
       movingIds
@@ -1619,6 +1724,142 @@ export function WatchfaceEditor({
     }).catch(() => {
       // The accurate preview stays visible if the isolated drag layer fails.
     });
+  }
+
+  function previewSpriteTransform(
+    drag: WatchfaceDragState,
+    point: { x: number; y: number },
+    preserveAspectRatio: boolean
+  ) {
+    if (!isSpriteTransformDrag(drag)) return;
+    const { initial, handle, startPointer } = drag.spriteTransform;
+    let next: WatchfaceSpriteTransform;
+    let rotationDelta = 0;
+    if (drag.kind === "spriteResize" && handle) {
+      next = resizeWatchfaceSprite(
+        initial,
+        handle,
+        point.x - drag.startX,
+        point.y - drag.startY,
+        preserveAspectRatio
+      );
+    } else {
+      const rotation = rotateWatchfaceSprite(
+        initial,
+        startPointer ?? { x: drag.startX, y: drag.startY },
+        point
+      );
+      next = { ...initial, rotation: rotation.rotation };
+      rotationDelta = rotation.rotationDelta;
+    }
+    const transform = {
+      x: Math.max(0, Math.min(previewWidth, next.x)),
+      y: Math.max(0, Math.min(previewHeight, next.y)),
+      width: next.width,
+      height: next.height,
+      rotation: next.rotation,
+      scaleX: next.width / initial.width,
+      scaleY: next.height / initial.height,
+      rotationDelta
+    };
+    const visual = dragVisualRef.current;
+    if (visual?.drag === drag) {
+      visual.spriteTransform = transform;
+      if (visual.baseFrame && visual.movingFrame) drawDragVisual();
+    }
+    setSpriteTransformDraft({
+      spriteId: drag.targetId,
+      transform
+    });
+  }
+
+  function startSpriteTransform(
+    event: React.PointerEvent<SVGSVGElement>,
+    control: "rotate" | WatchfaceSpriteResizeHandle
+  ) {
+    if (previewMode === "aod" || event.button !== 0 || !selectedLayer?.spriteId) {
+      return;
+    }
+    const sprite = (design.designSprites ?? []).find(
+      (candidate) => candidate.id === selectedLayer.spriteId
+    );
+    const point = toResolutionPoint(event);
+    if (!sprite || !point || isMovementLockedForId(selectedLayer.id)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const initial = {
+      x: sprite.x,
+      y: sprite.y,
+      width: sprite.width * sprite.scale,
+      height: sprite.height * sprite.scale,
+      rotation: sprite.rotation
+    };
+    const kind = control === "rotate" ? "spriteRotate" : "spriteResize";
+    const drag: WatchfaceDragState = {
+      kind,
+      targetId: sprite.id,
+      startX: point.x,
+      startY: point.y,
+      baseX: sprite.x,
+      baseY: sprite.y,
+      snapId: selectedLayer.id,
+      baseBounds: selectedLayer.bounds ?? {
+        x0: sprite.x - initial.width / 2,
+        y0: sprite.y - initial.height / 2,
+        x1: sprite.x + initial.width / 2,
+        y1: sprite.y + initial.height / 2
+      },
+      spriteTransform: {
+        initial,
+        scale: sprite.scale,
+        ...(control === "rotate"
+          ? { startPointer: point }
+          : { handle: control })
+      }
+    };
+    beginDesignTransaction();
+    dragRef.current = drag;
+    setSpriteTransformDraft({ spriteId: sprite.id, transform: initial });
+    prepareDragVisual(drag);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleSpriteTransformPointerDown(
+    event: React.PointerEvent<SVGSVGElement>
+  ) {
+    const target = event.target as SVGElement;
+    const control = target.getAttribute("data-sprite-transform-control");
+    if (control === "rotate" || control === "nw" || control === "ne" || control === "se" || control === "sw") {
+      startSpriteTransform(event, control);
+    }
+  }
+
+  function commitSpriteTransform(drag: WatchfaceDragState) {
+    if (!isSpriteTransformDrag(drag)) return false;
+    const transform = dragVisualRef.current?.drag === drag
+      ? dragVisualRef.current.spriteTransform
+      : undefined;
+    if (!transform) return false;
+    const initial = drag.spriteTransform.initial;
+    const changed =
+      Math.round(transform.x) !== Math.round(initial.x) ||
+      Math.round(transform.y) !== Math.round(initial.y) ||
+      Math.abs(transform.width - initial.width) > 0.01 ||
+      Math.abs(transform.height - initial.height) > 0.01 ||
+      Math.abs(transform.rotation - initial.rotation) > 0.01;
+    if (!changed) return false;
+    const commitId = ++dragCommitIdRef.current;
+    if (dragVisualRef.current?.drag === drag) {
+      dragVisualRef.current.awaitingCommitId = commitId;
+    }
+    updateSprite(drag.targetId, {
+      x: transform.x,
+      y: transform.y,
+      width: transform.width / drag.spriteTransform.scale,
+      height: transform.height / drag.spriteTransform.scale,
+      rotation: normalizeWatchfaceRotation(transform.rotation)
+    });
+    return true;
   }
 
   function updateElement(id: string, patch: BackgroundElementPatch) {
@@ -1959,6 +2200,9 @@ export function WatchfaceEditor({
       if (!layer.bounds || layer.kind === "background" || !layer.visible) {
         continue;
       }
+      if (selectedSpriteCanTransform && layer.id === selectedLayer?.id) {
+        continue;
+      }
       const active = selectedIds.includes(layer.id);
       const hovered = layer.id === hoveredId;
       if (!active && !hovered) continue;
@@ -2005,7 +2249,9 @@ export function WatchfaceEditor({
     watchCoordinateScale,
     dragVisualActive,
     previewMode,
-    design.linkedLayerGroups
+    design.linkedLayerGroups,
+    selectedLayer?.id,
+    selectedSpriteCanTransform
   ]);
 
   const toResolutionPoint = useCallback(
@@ -2789,7 +3035,7 @@ export function WatchfaceEditor({
     });
   }
 
-  function handlePointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
+  function handlePointerMove(event: React.PointerEvent<Element>) {
     if (previewMode === "aod") {
       setHoveredId(null);
       return;
@@ -2813,12 +3059,32 @@ export function WatchfaceEditor({
       );
       return;
     }
+    if (isSpriteTransformDrag(drag)) {
+      previewSpriteTransform(drag, point, event.shiftKey);
+      return;
+    }
     scheduleDragMovement({ drag, point, bypassSnap: event.altKey });
   }
 
-  function handlePointerEnd(event: React.PointerEvent<HTMLCanvasElement>) {
+  function handlePointerEnd(event: React.PointerEvent<Element>) {
     const drag = dragRef.current;
     if (drag) {
+      if (isSpriteTransformDrag(drag)) {
+        if (event.type === "pointerup") {
+          const point = toResolutionPoint(event);
+          if (point) previewSpriteTransform(drag, point, event.shiftKey);
+        }
+        const committed = commitSpriteTransform(drag);
+        if (!committed) hideDragVisual();
+        dragRef.current = null;
+        setSpriteTransformDraft(null);
+        clearSnapGuides();
+        endDesignTransaction();
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        return;
+      }
       if (event.type === "pointerup") {
         const point = toResolutionPoint(event);
         if (point) {
@@ -3272,6 +3538,8 @@ export function WatchfaceEditor({
     patch: Partial<{
       x: number;
       y: number;
+      width: number;
+      height: number;
       scale: number;
       rotation: number;
       visible: boolean;
@@ -3282,6 +3550,12 @@ export function WatchfaceEditor({
     const canMove = !isPositionLocked(`sprite:${spriteId}`);
     const boundedPatch = {
       ...otherPatch,
+      ...(patch.width !== undefined
+        ? { width: Math.max(1, Math.round(patch.width * 100) / 100) }
+        : {}),
+      ...(patch.height !== undefined
+        ? { height: Math.max(1, Math.round(patch.height * 100) / 100) }
+        : {}),
       ...(canMove && x !== undefined
         ? { x: Math.max(0, Math.min(previewWidth, Math.round(x))) }
         : {}),
@@ -4119,6 +4393,57 @@ export function WatchfaceEditor({
               onLostPointerCapture={handlePointerEnd}
               onContextMenu={handleCanvasContextMenu}
             />
+            {selectedSprite && spriteTransform && previewMode === "current" ? (
+              <svg
+                className={`wf-sprite-transform${selectedSpriteCanTransform ? "" : " is-locked"}`}
+                viewBox={`0 0 ${previewWidth} ${previewHeight}`}
+                aria-hidden="true"
+                onPointerDown={handleSpriteTransformPointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerEnd}
+                onPointerCancel={handlePointerEnd}
+                onLostPointerCapture={handlePointerEnd}
+              >
+                <g transform={`translate(${spriteTransform.x} ${spriteTransform.y}) rotate(${spriteTransform.rotation})`}>
+                  <rect
+                    className="wf-sprite-transform-box"
+                    x={-spriteTransform.width / 2}
+                    y={-spriteTransform.height / 2}
+                    width={spriteTransform.width}
+                    height={spriteTransform.height}
+                  />
+                  <line
+                    className="wf-sprite-transform-stem"
+                    x1="0"
+                    y1={-spriteTransform.height / 2}
+                    x2="0"
+                    y2={-spriteTransform.height / 2 - 20}
+                  />
+                  <circle
+                    className="wf-sprite-transform-handle wf-sprite-transform-rotate"
+                    data-sprite-transform-control="rotate"
+                    cx="0"
+                    cy={-spriteTransform.height / 2 - 24}
+                    r="5"
+                  />
+                  {([
+                    ["nw", -1, -1],
+                    ["ne", 1, -1],
+                    ["se", 1, 1],
+                    ["sw", -1, 1]
+                  ] as const).map(([handle, x, y]) => (
+                    <circle
+                      key={handle}
+                      className="wf-sprite-transform-handle"
+                      data-sprite-transform-control={handle}
+                      cx={(spriteTransform.width / 2) * x}
+                      cy={(spriteTransform.height / 2) * y}
+                      r="4.5"
+                    />
+                  ))}
+                </g>
+              </svg>
+            ) : null}
           </div>
           {contextMenu ? (
             <div
@@ -4405,6 +4730,7 @@ export function WatchfaceEditor({
   function renderConfigAssetInspector(reference: WatchfaceConfigAssetReference) {
     const override = design.configAssetOverrides?.[reference.id];
     const enabled = override?.enabled !== false;
+    const artworkZoom = override?.scale ?? 1;
     const templatePreview = configAssetPreviews.get(reference.archivePath);
     const previewDataUrl = override?.replacement?.dataUrl ?? templatePreview?.dataUrl;
     const dimensions = override?.replacement
@@ -4482,9 +4808,43 @@ export function WatchfaceEditor({
             </button>
           ) : null}
         </div>
+        {override?.replacement ? (
+          <>
+            <label className="field watchface-zoom-control">
+              Artwork zoom <span>{artworkZoom.toFixed(2)}×</span>
+              <input
+                type="range"
+                min="0.1"
+                max="4"
+                step="0.01"
+                value={artworkZoom}
+                onChange={(event) =>
+                  updateConfigAsset(reference, {
+                    scale: Number(event.target.value)
+                  })
+                }
+              />
+            </label>
+            <label className="watchface-inspector-field">
+              <span>Precise zoom</span>
+              <EditableNumberInput
+                min="0.1"
+                max="4"
+                step="0.01"
+                value={artworkZoom}
+                fallback={1}
+                onValueChange={(value) =>
+                  updateConfigAsset(reference, {
+                    scale: Math.max(0.1, Math.min(4, value))
+                  })
+                }
+              />
+            </label>
+          </>
+        ) : null}
         <p className="watchface-studio-summary">
           Parsed from {reference.scope === "aod" ? "AODconfig.txt" : "config.txt"}.
-          Visibility changes only this key. Replacements are resized for each device and do not alter other keys that share the original file.
+          Visibility changes only this key. Transparent padding is removed automatically. Artwork zoom enlarges and crops the image inside the firmware-required native canvas; it never changes the exported PNG dimensions. Other keys that share the original file are not altered.
         </p>
       </div>
     );
@@ -4622,7 +4982,7 @@ export function WatchfaceEditor({
             ) : null}
           </div>
           <p className="watchface-studio-summary">
-            Import PNGs named 00.png, 01.png, and so on. Each file replaces its matching battery charge state. Icon scale resizes every state bitmap and keeps it centered at the selected position.
+            Import PNGs named 00.png, 01.png, and so on. Each file replaces its matching battery charge state. Icon scale resizes every state bitmap; X and Y are exported directly as the bitmap position.
           </p>
           <label className="watchface-inspector-field">
             <span>Icon scale</span>
@@ -4854,7 +5214,7 @@ export function WatchfaceEditor({
             </span>
           </label>
           <label className="field">
-            Sprite scale
+            Artwork zoom
             <EditableNumberInput
               min="0.01"
               step="0.01"
@@ -4862,6 +5222,9 @@ export function WatchfaceEditor({
               fallback={1}
               onValueChange={(value) => setDateStyle(partId, { scale: Math.max(0.01, value) })}
             />
+            <span className="watchface-studio-summary">
+              Zooms and crops inside the component's fixed COROS canvas.
+            </span>
           </label>
           {renderPositionReadout(layer)}
         </div>
@@ -4877,7 +5240,7 @@ export function WatchfaceEditor({
         <div className="watchface-inspector-group">
           {renderLayerVisibilityToggle(layer)}
           <label className="field watchface-zoom-control">
-            Size <span>{(sprite.scale * 100).toFixed(0)}%</span>
+            Scale <span>{(sprite.scale * 100).toFixed(0)}%</span>
             <input
               type="range"
               min="0.2"
@@ -4898,6 +5261,52 @@ export function WatchfaceEditor({
               onChange={(e) => updateSprite(sprite.id, { rotation: Number(e.target.value) })}
             />
           </label>
+          <div className="watchface-sprite-transform-fields" aria-label="Image transform">
+            <label>
+              Width
+              <EditableNumberInput
+                min="1"
+                step="1"
+                value={toWatchCoordinate(sprite.width * sprite.scale)}
+                fallback={1}
+                onValueChange={(value) =>
+                  updateSprite(sprite.id, {
+                    width: fromWatchCoordinate(Math.max(1, value)) / sprite.scale
+                  })
+                }
+              />
+            </label>
+            <label>
+              Height
+              <EditableNumberInput
+                min="1"
+                step="1"
+                value={toWatchCoordinate(sprite.height * sprite.scale)}
+                fallback={1}
+                onValueChange={(value) =>
+                  updateSprite(sprite.id, {
+                    height: fromWatchCoordinate(Math.max(1, value)) / sprite.scale
+                  })
+                }
+              />
+            </label>
+            <label>
+              Rotation
+              <EditableNumberInput
+                min="0"
+                max="360"
+                step="1"
+                value={Math.round(sprite.rotation)}
+                fallback={0}
+                onValueChange={(value) =>
+                  updateSprite(sprite.id, { rotation: normalizeWatchfaceRotation(value) })
+                }
+              />
+            </label>
+          </div>
+          <p className="watchface-studio-summary">
+            Drag a corner on the face to resize. Hold Shift to keep proportions, or drag the round handle to rotate.
+          </p>
           {renderPositionPanel(layer.id, "Watch screen position", <>
             <div className="watchface-position-inputs">
               <label>

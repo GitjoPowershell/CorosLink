@@ -21,6 +21,11 @@ import {
   rotatedCenterBounds
 } from "../src/watchfaces/watchfaceEditorGeometry.ts";
 import {
+  normalizeWatchfaceRotation,
+  resizeWatchfaceSprite,
+  rotateWatchfaceSprite
+} from "../src/watchfaces/watchfaceSpriteTransform.ts";
+import {
   DEFAULT_WATCHFACE_PLACEMENT_PREFERENCES,
   WATCHFACE_PLACEMENT_STORAGE_KEY,
   backgroundElementSnapBounds,
@@ -144,6 +149,47 @@ const editorLayers = [
 ];
 assert.equal(editorLayerAtPoint(editorLayers, 400, 400)?.id, "small");
 assert.equal(editorLayerAtPoint(editorLayers, 10, 10)?.id, "background");
+
+// Image transform handles preserve the opposite corner, work in local rotated
+// axes, and leave aspect-ratio locking to the caller's modifier key.
+assert.deepEqual(
+  resizeWatchfaceSprite(
+    { x: 100, y: 100, width: 40, height: 20, rotation: 0 },
+    "se",
+    20,
+    10
+  ),
+  { x: 110, y: 105, width: 60, height: 30, rotation: 0 }
+);
+const rotatedResize = resizeWatchfaceSprite(
+  { x: 100, y: 100, width: 40, height: 20, rotation: 90 },
+  "se",
+  -10,
+  20
+);
+assert.equal(Math.round(rotatedResize.x), 95);
+assert.equal(Math.round(rotatedResize.y), 110);
+assert.equal(Math.round(rotatedResize.width), 60);
+assert.equal(Math.round(rotatedResize.height), 30);
+assert.deepEqual(
+  resizeWatchfaceSprite(
+    { x: 100, y: 100, width: 40, height: 20, rotation: 0 },
+    "se",
+    20,
+    2,
+    true
+  ),
+  { x: 110, y: 105, width: 60, height: 30, rotation: 0 }
+);
+assert.deepEqual(
+  rotateWatchfaceSprite(
+    { x: 100, y: 100, width: 40, height: 20, rotation: 350 },
+    { x: 100, y: 80 },
+    { x: 120, y: 100 }
+  ),
+  { rotation: 80, rotationDelta: 90 }
+);
+assert.equal(normalizeWatchfaceRotation(-10), 350);
 
 // Placement preferences are editor-only, tolerate invalid storage, and clamp
 // adjustable values without changing their opt-in defaults.

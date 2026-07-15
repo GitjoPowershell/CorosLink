@@ -310,9 +310,8 @@ export async function composeWatchfaceReplacements(
   const layoutOverrides = layoutIsActive(design)
     ? buildLayoutOverrides(layoutDetails, design.layoutOffsets ?? {})
     : [];
-  // Battery canvas scaling adjusts battery_icon_pos. Apply that adjustment to
-  // the already-positioned layout so export preserves the same position shown
-  // in the preview instead of overwriting the user's layout offset.
+  // Config-asset overrides are resolved against the positioned layout so any
+  // direct firmware coordinates remain exactly those shown in Studio.
   const configAssetPositionDetails = applyConfigOverridesToDetails(
     layoutDetails,
     layoutOverrides

@@ -439,11 +439,30 @@ const replacement = {
   width: 32,
   height: 48
 };
+const detailsWithControlIcon = {
+  ...details,
+  resolutions: details.resolutions.map((candidate) => ({
+    ...candidate,
+    config: {
+      ...candidate.config,
+      control_hr_icon: "icon\\hr.png"
+    },
+    icons: [
+      ...candidate.icons,
+      {
+        path: `${candidate.directory}/icon/hr.png`,
+        width: Math.max(8, Math.round(candidate.width * 0.04625)),
+        height: Math.max(8, Math.round(candidate.width * 0.04625))
+      }
+    ]
+  }))
+};
 const configAssetOverrides = buildWatchfaceConfigAssetOverrides(
-  details,
+  detailsWithControlIcon,
   {
     "config:colon_icon": { enabled: false },
     "config:control_colon_icon": { enabled: true, replacement },
+    "config:control_hr_icon": { enabled: true, replacement },
     "config:background_icon": { enabled: true, replacement },
     "aod:background_icon": { enabled: false }
   },
@@ -452,14 +471,19 @@ const configAssetOverrides = buildWatchfaceConfigAssetOverrides(
 const scaledBatteryOverrides = buildWatchfaceConfigAssetOverrides(details, {
   "config:battery_icon": { enabled: true, scale: 2 }
 });
-assert.deepEqual(
-  scaledBatteryOverrides.find(({ path }) => path.includes("416x416"))?.values,
-  { battery_icon_pos: "{60,25}" },
-  "A scaled battery bitmap should remain centered on its original position"
+assert.equal(
+  scaledBatteryOverrides.find(({ path }) => path.includes("416x416")),
+  undefined,
+  "Battery scaling must not alter the firmware position"
 );
 for (const override of configAssetOverrides.filter(({ path }) => /\/config\.txt$/i.test(path))) {
   assert.equal(override.values.colon_icon, "");
   assert.match(override.values.control_colon_icon, /^studio\\config-control_colon_icon-/);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(override.values, "control_hr_icon"),
+    false,
+    "Live control icons must keep their firmware-native config paths"
+  );
   assert.equal(
     Object.prototype.hasOwnProperty.call(override.values, "background_icon"),
     false,
@@ -860,17 +884,17 @@ const fullDateStyle = dateStyleOverrides.find((entry) =>
 );
 assert.equal(
   fullDateStyle?.values.english_date_week_rect,
-  "{60,312,260,392,hcenter|vcenter}"
+  "{80,320,240,384,hcenter|vcenter}"
 );
 assert.equal(fullDateStyle?.values.english_date_week_font, "cl_weekday");
 assert.equal(
   fullDateStyle?.values.english_date_month_rect,
-  "{304,304,400,400,hcenter|vcenter}"
+  "{320,320,384,384,hcenter|vcenter}"
 );
 assert.equal(fullDateStyle?.values.english_date_month_font, "cl_date_month");
 assert.equal(
   fullDateStyle?.values.english_date_day_rect,
-  "{408,328,456,376,hcenter|vcenter}"
+  "{400,320,464,384,hcenter|vcenter}"
 );
 assert.equal(fullDateStyle?.values.english_date_day_font, "cl_date_day");
 const layerColorOverrides = buildLayerColorOverrides(withMetrics, {

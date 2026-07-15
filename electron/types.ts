@@ -390,7 +390,7 @@ export interface CorosWatchfaceArtwork {
 export interface CorosWatchfaceConfigAssetOverride {
   /** Absent means the template config entry remains enabled. */
   enabled?: boolean;
-  /** Bitmap-canvas scale for a battery state sprite. */
+  /** Battery canvas scale, or artwork zoom inside a fixed direct-asset canvas. */
   scale?: number;
   /** One source PNG is resized independently for every device resolution. */
   replacement?: CorosWatchfaceArtwork;

@@ -302,6 +302,27 @@ function configAssetCreatedRelativePath(id: string): string {
   return `studio/${configAssetFolder(id)}/00.png`;
 }
 
+const NATIVE_CONTROL_ICON_KEYS = new Set([
+  "control_barometer_icon",
+  "control_bluetooth_off_icon",
+  "control_bluetooth_on_icon",
+  "control_elevation_icon",
+  "control_exercise_icon",
+  "control_floor_icon",
+  "control_hr_icon",
+  "control_kcal_icon",
+  "control_no_disturb_off_icon",
+  "control_no_disturb_on_icon",
+  "control_step_icon",
+  "control_sunrise_icon",
+  "control_sunset_icon",
+  "control_temperature_icon"
+]);
+
+function replaceConfigAssetInPlace(configKey: string): boolean {
+  return NATIVE_CONTROL_ICON_KEYS.has(configKey);
+}
+
 /**
  * Applies per-reference visibility in preview and isolated replacement paths
  * during export. A replacement never mutates another config key that happens
@@ -328,49 +349,15 @@ export function buildWatchfaceConfigAssetOverrides(
           values[configKey] = "";
         } else if (
           includeReplacementPaths &&
-          override.replacement
+          override.replacement &&
+          !replaceConfigAssetInPlace(configKey)
         ) {
           values[configKey] = configAssetCreatedRelativePath(id).replace(/\//g, "\\");
         }
       }
-      // Battery state bitmaps are anchored at their top-left corner by the
-      // firmware. When the bitmap scale changes their canvas,
-      // compensate the configured position so the original icon centre stays
-      // in place on both the preview and the watch.
-      const batteryOverride = overrides["config:battery_icon"];
-      const batteryScale = batteryOverride?.scale ?? 1;
-      if (scope === "config" && batteryOverride && batteryScale !== 1) {
-        const batteryFolderName = (
-          resolution.config.battery_icon_dir || resolution.config.control_battery_icon_dir
-        )?.replace(/\\/g, "/");
-        const batteryFolder =
-          (batteryFolderName
-            ? resolution.spriteFolders.find(
-                (folder) => folder.kind === "state" && folder.folder === batteryFolderName
-              )
-            : undefined) ??
-          resolution.spriteFolders.find(
-            (folder) => folder.kind === "state" && folder.folder.replace(/^a\//, "") === "battery"
-          );
-        const sprite = batteryFolder?.files[0];
-        const position = parseConfigPos(resolution.config.battery_icon_pos);
-        if (sprite && position) {
-          const artwork = Object.values(batteryOverride.stateReplacements ?? {})[0] ??
-            batteryOverride.replacement;
-          const scaledSize = artwork
-            ? scaledBatterySpriteCanvasSize(
-                artwork.width,
-                artwork.height,
-                sprite.width,
-                sprite.height,
-                batteryScale
-              )
-            : { width: sprite.width * batteryScale, height: sprite.height * batteryScale };
-          const offsetX = Math.round((scaledSize.width - sprite.width) / 2);
-          const offsetY = Math.round((scaledSize.height - sprite.height) / 2);
-          values.battery_icon_pos = `{${position.x - offsetX},${position.y - offsetY}}`;
-        }
-      }
+      // `battery_icon_pos` is the bitmap's firmware position. Scaling changes
+      // only the PNG dimensions; preserving this value keeps Studio and the
+      // watch on the same coordinate instead of shifting the icon up-left.
       if (Object.keys(values).length > 0) {
         result.push({
           path: `${resolution.directory}/${scope === "aod" ? "AODconfig" : "config"}.txt`,
@@ -399,16 +386,23 @@ export async function buildWatchfaceConfigAssetReplacements(
         const source = resolution.icons.find(
           (file) => file.path === `${resolution.directory}/${relativePath}`
         );
+        // Direct config PNGs have a firmware-defined canvas size. Unlike the
+        // battery state folder, changing these dimensions can restart the
+        // watch and leave the face blank, so replacements must stay native.
         const width = source?.width ?? override.replacement.width;
         const height = source?.height ?? override.replacement.height;
+        const replaceInPlace = Boolean(source) && replaceConfigAssetInPlace(configKey);
         replacements.push({
-          path: `${resolution.directory}/${configAssetCreatedRelativePath(id)}`,
-          dataUrl: await resizeAndTintSprite(
+          path: replaceInPlace
+            ? source!.path
+            : `${resolution.directory}/${configAssetCreatedRelativePath(id)}`,
+          dataUrl: await fitVisibleSpriteToCanvas(
             override.replacement.dataUrl,
-            Math.max(1, width),
-            Math.max(1, height)
+            width,
+            height,
+            override.scale ?? 1
           ),
-          create: true
+          create: !replaceInPlace
         });
       }
     }
@@ -1106,6 +1100,78 @@ export async function resizeAndTintSprite(
     context.fillStyle = color;
     context.fillRect(0, 0, width, height);
   }
+  return canvas.toDataURL("image/png");
+}
+
+/**
+ * Removes transparent source padding and fits the visible artwork into a
+ * firmware-sized canvas without distorting its aspect ratio. Zoom may enlarge
+ * the artwork beyond the canvas; the excess is intentionally clipped while
+ * the exported PNG dimensions remain firmware-safe.
+ */
+export async function fitVisibleSpriteToCanvas(
+  dataUrl: string,
+  width: number,
+  height: number,
+  zoom = 1
+): Promise<string> {
+  const image = await loadStudioImage(dataUrl);
+  const source = document.createElement("canvas");
+  source.width = image.naturalWidth;
+  source.height = image.naturalHeight;
+  const sourceContext = source.getContext("2d", { willReadFrequently: true });
+  if (!sourceContext) {
+    throw new Error("Sprite fitting is unavailable in this window.");
+  }
+  sourceContext.drawImage(image, 0, 0);
+  const pixels = sourceContext.getImageData(
+    0,
+    0,
+    source.width,
+    source.height
+  ).data;
+  let left = source.width;
+  let top = source.height;
+  let right = -1;
+  let bottom = -1;
+  for (let y = 0; y < source.height; y += 1) {
+    for (let x = 0; x < source.width; x += 1) {
+      if (pixels[(y * source.width + x) * 4 + 3]! < 8) continue;
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+      right = Math.max(right, x);
+      bottom = Math.max(bottom, y);
+    }
+  }
+  if (right < left || bottom < top) {
+    return resizeAndTintSprite(dataUrl, width, height);
+  }
+  const contentWidth = right - left + 1;
+  const contentHeight = bottom - top + 1;
+  const safeZoom = Math.max(0.1, Math.min(4, zoom));
+  const fit = Math.min(width / contentWidth, height / contentHeight) * safeZoom;
+  const outputWidth = Math.max(1, Math.round(contentWidth * fit));
+  const outputHeight = Math.max(1, Math.round(contentHeight * fit));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Sprite fitting is unavailable in this window.");
+  }
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(
+    image,
+    left,
+    top,
+    contentWidth,
+    contentHeight,
+    Math.round((width - outputWidth) / 2),
+    Math.round((height - outputHeight) / 2),
+    outputWidth,
+    outputHeight
+  );
   return canvas.toDataURL("image/png");
 }
 
@@ -2499,7 +2565,7 @@ export async function buildTimeSpriteReplacements(
   return replacements;
 }
 
-/** Scales weekday/month/day layout rectangles and isolates their sprite folders. */
+/** Isolates weekday/month/day sprite folders while preserving firmware-native rectangles. */
 export function buildDateStyleOverrides(
   details: CorosWatchfaceTemplateDetails,
   styles: WatchfaceDateStyles,
@@ -2510,9 +2576,7 @@ export function buildDateStyleOverrides(
     const values: Record<string, string> = {};
     for (const part of WATCHFACE_DATE_PARTS) {
       const style = styles[part.id];
-      const rect = style
-        ? scaleConfigRectValue(resolution.config[part.rectKey] ?? "", style.scale)
-        : null;
+      const rect = resolution.config[part.rectKey];
       const source = findSpriteFolder(resolution, resolution.config[part.fontKey]);
       if (!style || !rect || !source) {
         continue;
@@ -2533,7 +2597,7 @@ export function buildDateStyleOverrides(
   return overrides;
 }
 
-/** Generates isolated, resized sprite folders for weekday/month/day layers. */
+/** Generates isolated date sprites in the template's firmware-native canvases. */
 export async function buildDateSpriteReplacements(
   details: CorosWatchfaceTemplateDetails,
   styles: WatchfaceDateStyles,
@@ -2554,6 +2618,7 @@ export async function buildDateSpriteReplacements(
     typography: WatchfaceTypography;
     rasterized: boolean;
     color?: string;
+    zoom: number;
   }[] = [];
   for (const resolution of details.resolutions) {
     for (const part of WATCHFACE_DATE_PARTS) {
@@ -2564,7 +2629,6 @@ export async function buildDateSpriteReplacements(
       if (!style || !source) {
         continue;
       }
-      const normalizedScale = normalizeSpriteScale(style.scale);
       const partFontFamily = style.fontFamily ?? options.fontFamily;
       const partTypography = {
         ...options,
@@ -2576,8 +2640,8 @@ export async function buildDateSpriteReplacements(
           source: file,
           path: `${resolution.directory}/${part.studioFolder}/${String(value).padStart(2, "0")}.png`,
           value,
-          width: Math.max(1, Math.round(file.width * normalizedScale)),
-          height: Math.max(1, Math.round(file.height * normalizedScale)),
+          width: file.width,
+          height: file.height,
           kind: part.kind,
           fontFamily: partFontFamily,
           typography: partTypography,
@@ -2588,7 +2652,8 @@ export async function buildDateSpriteReplacements(
             partFontFamily,
             partTypography
           ),
-          color: style.color
+          color: style.color,
+          zoom: normalizeSpriteScale(style.scale)
         });
       });
     }
@@ -2605,7 +2670,7 @@ export async function buildDateSpriteReplacements(
     if (!asset && !job.rasterized) {
       continue;
     }
-    const dataUrl = job.rasterized
+    const baseDataUrl = job.rasterized
       ? await renderWatchfaceTextSprite(
           job.kind === "week"
             ? WEEKDAY_LABELS[job.value] ?? String(job.value)
@@ -2625,6 +2690,12 @@ export async function buildDateSpriteReplacements(
               ? options.digitColor
               : undefined)
         );
+    const dataUrl = await fitVisibleSpriteToCanvas(
+      baseDataUrl,
+      job.width,
+      job.height,
+      job.zoom
+    );
     replacements.push({ path: job.path, dataUrl, create: true });
   }
   return replacements;
@@ -3640,20 +3711,30 @@ export async function drawStudioPreview(
     file: CorosWatchfaceSpriteFile,
     color: string | null = null
   ): Promise<HTMLImageElement | undefined> => {
-    const cacheKey = `${configKey}|${color ?? "original"}`;
+    const override = options.configAssetOverrides?.[
+      watchfaceConfigAssetId(options.configAssetScope ?? "config", configKey)
+    ];
+    const replacement = override?.replacement;
+    const artworkZoom = replacement ? override?.scale ?? 1 : 1;
+    const cacheKey = `${configKey}|${color ?? "original"}|${artworkZoom}`;
     const cached = configuredAssetImages.get(cacheKey);
     if (cached) return cached;
-    const replacement = options.configAssetOverrides?.[
-      watchfaceConfigAssetId(options.configAssetScope ?? "config", configKey)
-    ]?.replacement;
     const sourceDataUrl = replacement?.dataUrl ?? loadedAssets.get(file.path)?.dataUrl;
     if (!sourceDataUrl) return loaded.get(file.path);
-    const image = await loadStudioImage(await resizeAndTintSprite(
-      sourceDataUrl,
-      file.width,
-      file.height,
-      replacement ? undefined : color ?? undefined
-    ));
+    const renderedDataUrl = replacement
+      ? await fitVisibleSpriteToCanvas(
+          sourceDataUrl,
+          file.width,
+          file.height,
+          artworkZoom
+        )
+      : await resizeAndTintSprite(
+          sourceDataUrl,
+          file.width,
+          file.height,
+          color ?? undefined
+        );
+    const image = await loadStudioImage(renderedDataUrl);
     configuredAssetImages.set(cacheKey, image);
     return image;
   };
@@ -3790,10 +3871,10 @@ export async function drawStudioPreview(
       const gapCenterY = (hourCenterY + minuteCenterY) / 2;
       context.drawImage(
         image,
-        (gapCenterX - colonFile.width / 2) * scale,
-        (gapCenterY - colonFile.height / 2) * scale,
-        colonFile.width * scale,
-        colonFile.height * scale
+        (gapCenterX - image.naturalWidth / 2) * scale,
+        (gapCenterY - image.naturalHeight / 2) * scale,
+        image.naturalWidth * scale,
+        image.naturalHeight * scale
       );
     }
   }
@@ -3805,20 +3886,22 @@ export async function drawStudioPreview(
         image,
         arcCutPos.x * scale,
         arcCutPos.y * scale,
-        arcCutFile.width * scale,
-        arcCutFile.height * scale
+        image.naturalWidth * scale,
+        image.naturalHeight * scale
       );
     }
   }
 
   if (batteryFile && batteryIconPos) {
-    const stateReplacement = options.configAssetOverrides?.["config:battery_icon"]
-      ?.stateReplacements?.[String(batteryFileIndex)];
-    const batteryIconScale = options.configAssetOverrides?.["config:battery_icon"]?.scale ?? 1;
-    const image = stateReplacement
+    const batteryOverride = options.configAssetOverrides?.["config:battery_icon"];
+    const batteryReplacement =
+      batteryOverride?.stateReplacements?.[String(batteryFileIndex)] ??
+      batteryOverride?.replacement;
+    const batteryIconScale = batteryOverride?.scale ?? 1;
+    const image = batteryReplacement
       ? await loadStudioImage(
           await renderScaledSpriteInSlot(
-            stateReplacement.dataUrl,
+            batteryReplacement.dataUrl,
             batteryFile.width,
             batteryFile.height,
             batteryIconScale
@@ -3845,17 +3928,37 @@ export async function drawStudioPreview(
     };
     let image = loaded.get(weekFile.path);
     const weekScale = normalizeSpriteScale(weekStyle?.scale);
-    const weekWidth = Math.max(1, Math.round(weekFile.width * weekScale));
-    const weekHeight = Math.max(1, Math.round(weekFile.height * weekScale));
+    const weekWidth = weekFile.width;
+    const weekHeight = weekFile.height;
     if (shouldRenderWatchfaceText(WEEKDAY_LABELS[weekdayIndex] ?? "DAY", weekFontFamily, weekTypography)) {
       image = await loadStudioImage(
-        await renderWatchfaceTextSprite(
-          WEEKDAY_LABELS[weekdayIndex] ?? "DAY",
+        await fitVisibleSpriteToCanvas(
+          await renderWatchfaceTextSprite(
+            WEEKDAY_LABELS[weekdayIndex] ?? "DAY",
+            weekWidth,
+            weekHeight,
+            weekFontFamily,
+            weekColor ?? options.digitColor,
+            weekTypography
+          ),
           weekWidth,
           weekHeight,
-          weekFontFamily,
-          weekColor ?? options.digitColor,
-          weekTypography
+          weekScale
+        )
+      );
+    } else if (weekStyle && loadedAssets.get(weekFile.path)?.dataUrl) {
+      image = await loadStudioImage(
+        await fitVisibleSpriteToCanvas(
+          await resizeAndTintSprite(
+            loadedAssets.get(weekFile.path)!.dataUrl,
+            weekWidth,
+            weekHeight,
+            weekStyle.color ??
+              (options.tintLabels ? options.digitColor : undefined)
+          ),
+          weekWidth,
+          weekHeight,
+          weekScale
         )
       );
     }
@@ -3889,8 +3992,8 @@ export async function drawStudioPreview(
         image,
         complicationIconPos.x * scale,
         complicationIconPos.y * scale,
-        complicationIcon.width * scale,
-        complicationIcon.height * scale
+        image.naturalWidth * scale,
+        image.naturalHeight * scale
       );
     }
   } else if (complication?.id === "battery" && complicationIconPos) {
@@ -3980,8 +4083,8 @@ export async function drawStudioPreview(
       );
       const styledFile = {
         ...file,
-        width: Math.max(1, Math.round(file.width * glyphScale)),
-        height: Math.max(1, Math.round(file.height * glyphScale))
+        width: dateStyle ? file.width : Math.max(1, Math.round(file.width * glyphScale)),
+        height: dateStyle ? file.height : Math.max(1, Math.round(file.height * glyphScale))
       };
       const glyphColor =
         timeStyle?.color ??
@@ -3993,23 +4096,48 @@ export async function drawStudioPreview(
       let image = styledMetricGlyphs.get(cacheKey);
       if (!image) {
         if (shouldRenderWatchfaceText(digit, glyphFontFamily, glyphTypography)) {
+          const rendered = await renderWatchfaceTextSprite(
+            digit,
+            styledFile.width,
+            styledFile.height,
+            glyphFontFamily,
+            glyphColor,
+            glyphTypography
+          );
           image = await loadStudioImage(
-            await renderWatchfaceTextSprite(
-              digit,
-              styledFile.width,
-              styledFile.height,
-              glyphFontFamily,
-              glyphColor,
-              glyphTypography
-            )
+            dateStyle
+              ? await fitVisibleSpriteToCanvas(
+                  rendered,
+                  styledFile.width,
+                  styledFile.height,
+                  glyphScale
+                )
+              : rendered
           );
         } else if (timeStyle?.color || metricStyle?.color || dateStyle?.color || componentColor) {
-          image = await loadStudioImage(
-            await resizeAndTintSprite(
+          const rendered = await resizeAndTintSprite(
               loadedAssets.get(file.path)?.dataUrl ?? "",
               styledFile.width,
               styledFile.height,
               glyphColor
+            );
+          image = await loadStudioImage(
+            dateStyle
+              ? await fitVisibleSpriteToCanvas(
+                  rendered,
+                  styledFile.width,
+                  styledFile.height,
+                  glyphScale
+                )
+              : rendered
+          );
+        } else if (dateStyle && loadedAssets.get(file.path)?.dataUrl) {
+          image = await loadStudioImage(
+            await fitVisibleSpriteToCanvas(
+              loadedAssets.get(file.path)!.dataUrl,
+              styledFile.width,
+              styledFile.height,
+              glyphScale
             )
           );
         } else {
@@ -4033,9 +4161,7 @@ export async function drawStudioPreview(
           separatorIconColor
         )
       : undefined;
-    const separatorWidth = separatorImage && plan.separator
-      ? plan.separator.file.width
-      : 0;
+    const separatorWidth = separatorImage ? separatorImage.naturalWidth : 0;
     const totalWidth = glyphs.reduce((sum, glyph) => sum + glyph.file.width, 0) + separatorWidth;
     const centerX = (plan.rect.x0 + plan.rect.x1) / 2;
     const centerY = (plan.rect.y0 + plan.rect.y1) / 2;
@@ -4045,11 +4171,11 @@ export async function drawStudioPreview(
         context.drawImage(
           separatorImage,
           x * scale,
-          (centerY - plan.separator.file.height / 2) * scale,
-          plan.separator.file.width * scale,
-          plan.separator.file.height * scale
+          (centerY - separatorImage.naturalHeight / 2) * scale,
+          separatorImage.naturalWidth * scale,
+          separatorImage.naturalHeight * scale
         );
-        x += plan.separator.file.width;
+        x += separatorImage.naturalWidth;
       }
       context.drawImage(
         glyph.image,
@@ -4077,10 +4203,10 @@ export async function drawStudioPreview(
         (first.y0 + first.y1 + second.y0 + second.y1) / 4;
       context.drawImage(
         image,
-        (centerX - controlColonFile.width / 2) * scale,
-        (centerY - controlColonFile.height / 2) * scale,
-        controlColonFile.width * scale,
-        controlColonFile.height * scale
+        (centerX - image.naturalWidth / 2) * scale,
+        (centerY - image.naturalHeight / 2) * scale,
+        image.naturalWidth * scale,
+        image.naturalHeight * scale
       );
     }
   }
@@ -4128,8 +4254,8 @@ export async function drawStudioPreview(
       analogIconColor
     );
     if (!image) continue;
-    const width = layer.source.width * scale;
-    const height = layer.source.height * scale;
+    const width = image.naturalWidth * scale;
+    const height = image.naturalHeight * scale;
     context.save();
     context.translate(layer.center.x * scale, layer.center.y * scale);
     if (layer.rotationDegrees !== null) {
