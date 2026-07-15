@@ -251,6 +251,18 @@ import {
   getCorosMcpStatus,
   listCorosMcpTools
 } from "./corosMcpService";
+import {
+  connectMcpServer,
+  disconnectMcpServer,
+  getMcpStatuses
+} from "./mcpClientManager";
+import {
+  addMcpServer,
+  listMcpServers,
+  removeMcpServer,
+  setMcpBearer,
+  updateMcpServer
+} from "./mcpServersStore";
 import { getTrainingDailyHealthData } from "./dailyHealthDataService";
 import { getTrainingSleepData } from "./sleepDataService";
 import type {
@@ -1080,6 +1092,26 @@ function registerIpcHandlers(): void {
   ipcMain.handle("chatMcp:disconnect", () => disconnectCorosMcp());
 
   ipcMain.handle("chatMcp:listTools", () => listCorosMcpTools());
+
+  // Generic MCP server registry.
+  ipcMain.handle("mcp:listServers", () => listMcpServers());
+  ipcMain.handle("mcp:addServer", (_event, input) => addMcpServer(input));
+  ipcMain.handle("mcp:updateServer", (_event, id: string, patch) =>
+    updateMcpServer(id, patch)
+  );
+  ipcMain.handle("mcp:removeServer", (_event, id: string) =>
+    removeMcpServer(id)
+  );
+  ipcMain.handle("mcp:connect", (_event, id: string) =>
+    connectMcpServer(id, true, mainWindow)
+  );
+  ipcMain.handle("mcp:disconnect", (_event, id: string) =>
+    disconnectMcpServer(id)
+  );
+  ipcMain.handle("mcp:statuses", () => getMcpStatuses());
+  ipcMain.handle("mcp:setBearer", (_event, id: string, token: string) =>
+    setMcpBearer(id, token)
+  );
 
   ipcMain.handle("chat:uploadPlanDraft", (_event, draftId: string) =>
     uploadTrainingPlanDraft(draftId)
