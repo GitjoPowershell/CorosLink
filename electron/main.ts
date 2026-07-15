@@ -467,7 +467,11 @@ function applyAppIcon(): void {
   }
 
   if (process.platform === "darwin" && app.dock) {
-    app.dock.setIcon(iconPath);
+    try {
+      app.dock.setIcon(iconPath);
+    } catch {
+      // A bad/missing dock icon (e.g. in dev) must not abort app startup.
+    }
   }
 }
 
