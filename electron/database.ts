@@ -1122,7 +1122,8 @@ export function setTrainingActivityFeelType(
 
 /**
  * Activities on/after `sinceEpochSeconds` whose feel_type has never been
- * fetched (NULL), oldest first, for backfilling from the detail endpoint.
+ * fetched (NULL), NEWEST first — recent sessions are the most likely to be
+ * rated, so they populate the heatmap soonest.
  */
 export function listTrainingActivitiesMissingFeelType(
   sinceEpochSeconds: number,
@@ -1133,7 +1134,7 @@ export function listTrainingActivitiesMissingFeelType(
       `SELECT activity_id, sport_type
        FROM training_activities
        WHERE feel_type IS NULL AND start_time >= ?
-       ORDER BY start_time ASC
+       ORDER BY start_time DESC
        LIMIT ?`
     )
     .all(sinceEpochSeconds, limit) as {
@@ -1144,6 +1145,20 @@ export function listTrainingActivitiesMissingFeelType(
     activityId: row.activity_id,
     sportType: row.sport_type
   }));
+}
+
+/** How many activities in the window still need a feelType fetch. */
+export function countTrainingActivitiesMissingFeelType(
+  sinceEpochSeconds: number
+): number {
+  const row = requireDatabase()
+    .prepare(
+      `SELECT count(*) AS n
+       FROM training_activities
+       WHERE feel_type IS NULL AND start_time >= ?`
+    )
+    .get(sinceEpochSeconds) as { n: number };
+  return row.n;
 }
 
 /** Rated activities on/after `sinceEpochSeconds`, for computing daily sRPE. */

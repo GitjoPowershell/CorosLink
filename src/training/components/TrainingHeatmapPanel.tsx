@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { CalendarDays } from "lucide-react";
+import { CalendarDays, Loader2 } from "lucide-react";
 import type { TrainingHubActivity } from "../../../electron/types";
 import {
   formatDistanceMeters,
@@ -32,6 +32,7 @@ import type {
 interface TrainingHeatmapPanelProps {
   snapshot: TrainingHubSnapshot | null;
   activities?: TrainingHubActivity[];
+  rpeBackfill?: { pending: number; running: boolean } | null;
 }
 
 const WEEKDAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
@@ -89,7 +90,8 @@ function formatCellAriaLabel(cell: HeatmapCell, metric: HeatmapMetric): string {
 
 export function TrainingHeatmapPanel({
   snapshot,
-  activities = []
+  activities = [],
+  rpeBackfill = null
 }: TrainingHeatmapPanelProps) {
   const reducedMotion = usePrefersReducedMotion();
   const [isReady, setIsReady] = useState(false);
@@ -186,6 +188,15 @@ export function TrainingHeatmapPanel({
           </span>
         </div>
       </div>
+
+      {isRpe && rpeBackfill && (rpeBackfill.pending > 0 || rpeBackfill.running) ? (
+        <div className="training-heatmap-loading" role="status">
+          <Loader2 size={14} className="spin" aria-hidden="true" />
+          <span>
+            Loading RPE data… {rpeBackfill.pending} to go
+          </span>
+        </div>
+      ) : null}
 
       {hasData ? (
         <>

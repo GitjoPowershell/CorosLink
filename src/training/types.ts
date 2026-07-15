@@ -94,6 +94,7 @@ export interface TrainingHubViewProps {
   upcomingWorkouts: TrainingHubUpcomingWorkout[];
   snapshot: TrainingHubSnapshot | null;
   sportTypes: TrainingHubSportType[];
+  rpeBackfill?: { pending: number; running: boolean } | null;
   activityDetail: TrainingHubActivityDetail | null;
   selectedActivity: TrainingHubActivity | null;
   busy: string | null;

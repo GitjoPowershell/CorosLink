@@ -471,6 +471,12 @@ const api = {
     ipcRenderer.invoke("trainingHub:getDashboard"),
   getDailyMetrics: (dateList: string[]): Promise<TrainingHubDailyMetrics> =>
     ipcRenderer.invoke("trainingHub:getDailyMetrics", dateList),
+  startRpeBackfill: (): Promise<void> =>
+    ipcRenderer.invoke("trainingHub:startRpeBackfill"),
+  getRpeBackfillStatus: (): Promise<{ pending: number; running: boolean }> =>
+    ipcRenderer.invoke("trainingHub:getRpeBackfillStatus"),
+  getRpeLoadByDay: (): Promise<Record<string, number>> =>
+    ipcRenderer.invoke("trainingHub:getRpeLoadByDay"),
   getSportTypeMap: (): Promise<TrainingHubSportType[]> =>
     ipcRenderer.invoke("trainingHub:getSportTypeMap"),
   getActivityPaceBaselines: (): Promise<ActivityPaceBaselines> =>

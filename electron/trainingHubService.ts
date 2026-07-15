@@ -8,6 +8,7 @@ import {
   mergeSportTypeEntries
 } from "./corosSportTypes";
 import {
+  countTrainingActivitiesMissingFeelType,
   deleteSettings,
   getSetting,
   listStoredTrainingActivities,
@@ -601,10 +602,9 @@ function cacheFeelTypeFromDetail(
 }
 
 const HEATMAP_WINDOW_DAYS = 365;
-// Per background run. Detail fetches are ~1 MB and awaited sequentially, so
-// they self-throttle; a run of this size finishes in a handful of seconds and
-// the next Training Hub load continues where it left off.
-const FEEL_BACKFILL_BATCH = 150;
+// Query pending activities in chunks so the DB read stays small; the whole
+// window is still drained in one background run.
+const FEEL_BACKFILL_CHUNK = 50;
 let feelBackfillRunning = false;
 
 function heatmapWindowStartEpochSeconds(): number {
@@ -614,37 +614,70 @@ function heatmapWindowStartEpochSeconds(): number {
   return Math.floor(start.getTime() / 1000);
 }
 
-// Fetch feelType for activities in the heatmap window that were never fetched,
-// one small throttled batch at a time. Fire-and-forget; guarded so only one
-// run happens at once. Each detail is ~1 MB, so keep batches modest.
-async function backfillFeelTypes(): Promise<void> {
+/** How much of the RPE backfill is left for the heatmap window. */
+export function getRpeBackfillStatus(): {
+  pending: number;
+  running: boolean;
+} {
+  const since = heatmapWindowStartEpochSeconds();
+  const pending = countTrainingActivitiesMissingFeelType(since);
+  return { pending, running: feelBackfillRunning };
+}
+
+/** Per-day Foster sRPE for the heatmap window, keyed by happenDay (YYYYMMDD). */
+export function getRpeLoadByDay(): Record<string, number> {
+  const since = heatmapWindowStartEpochSeconds();
+  const byDay = dailyRpeLoad(listTrainingActivityRpeInputs(since));
+  return Object.fromEntries(byDay);
+}
+
+// Fetch feelType for every activity in the heatmap window that was never
+// fetched, draining the queue in one throttled background run. Fire-and-forget;
+// guarded so only one run happens at once. Each detail is ~1 MB and awaited
+// sequentially, so the fetches self-throttle.
+export async function backfillFeelTypes(): Promise<void> {
   if (feelBackfillRunning) {
+    return;
+  }
+  if (!getStoredAuth()) {
     return;
   }
   feelBackfillRunning = true;
   try {
     const since = heatmapWindowStartEpochSeconds();
-    const pending = listTrainingActivitiesMissingFeelType(
-      since,
-      FEEL_BACKFILL_BATCH
-    );
     const userId = getStoredAuth()?.userId;
-    for (const { activityId, sportType } of pending) {
-      try {
-        const raw = await trainingHubRequest<Record<string, unknown>>(
-          "/activity/detail/query",
-          {
-            method: "POST",
-            params: {
-              labelId: activityId,
-              sportType,
-              ...(userId ? { userId } : {})
+    // Re-query each chunk: rows drop out of "missing" as we cache them.
+    for (;;) {
+      const pending = listTrainingActivitiesMissingFeelType(
+        since,
+        FEEL_BACKFILL_CHUNK
+      );
+      if (pending.length === 0) {
+        break;
+      }
+      for (const { activityId, sportType } of pending) {
+        try {
+          const raw = await trainingHubRequest<Record<string, unknown>>(
+            "/activity/detail/query",
+            {
+              method: "POST",
+              params: {
+                labelId: activityId,
+                sportType,
+                ...(userId ? { userId } : {})
+              }
             }
+          );
+          cacheFeelTypeFromDetail(activityId, raw);
+        } catch {
+          // Mark as attempted (0 = unrated) so a permanently failing activity
+          // doesn't wedge the drain loop into an infinite retry.
+          try {
+            setTrainingActivityFeelType(activityId, 0);
+          } catch {
+            // ignore
           }
-        );
-        cacheFeelTypeFromDetail(activityId, raw);
-      } catch {
-        // Skip this one; it'll be retried on a later pass.
+        }
       }
     }
   } finally {

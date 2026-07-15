@@ -44,6 +44,7 @@ export function TrainingHubView({
   upcomingWorkouts,
   snapshot,
   sportTypes,
+  rpeBackfill,
   activityDetail,
   selectedActivity,
   busy,
@@ -381,7 +382,11 @@ export function TrainingHubView({
           </section>
 
           <div className="training-heatmap-wrap">
-            <TrainingHeatmapPanel snapshot={snapshot} activities={activities} />
+            <TrainingHeatmapPanel
+              snapshot={snapshot}
+              activities={activities}
+              rpeBackfill={rpeBackfill}
+            />
           </div>
           <TrainingTrendCharts points={snapshot?.trendPoints ?? []} />
           <TrainingZoneDistributionCharts

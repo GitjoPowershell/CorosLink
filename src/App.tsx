@@ -226,6 +226,10 @@ export default function App() {
     useState<TrainingHubDashboard | null>(null);
   const [trainingHubDailyMetrics, setTrainingHubDailyMetrics] =
     useState<TrainingHubDailyMetrics | null>(null);
+  const [rpeBackfill, setRpeBackfill] = useState<{
+    pending: number;
+    running: boolean;
+  } | null>(null);
   const [trainingHubSportTypes, setTrainingHubSportTypes] = useState<
     TrainingHubSportType[]
   >([]);
@@ -1490,6 +1494,72 @@ export default function App() {
     trainingHubDailyHealthData,
   ]);
 
+  // Kick the RPE backfill and poll until the heatmap window is fully fetched,
+  // merging freshly-cached sRPE into the daily metrics so the RPE view fills in
+  // live (and the header can show a loading indicator).
+  useEffect(() => {
+    if (!api || !trainingHubStatus?.authenticated || !trainingHubDailyMetrics) {
+      return;
+    }
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const mergeRpe = (record: Record<string, number>) => {
+      if (Object.keys(record).length === 0) {
+        return;
+      }
+      setTrainingHubDailyMetrics((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        const byDay = new Map(prev.dayList.map((day) => [day.happenDay, day]));
+        for (const [happenDay, load] of Object.entries(record)) {
+          const existing = byDay.get(happenDay);
+          if (existing) {
+            byDay.set(happenDay, { ...existing, rpeLoad: load });
+          } else {
+            byDay.set(happenDay, { happenDay, rpeLoad: load });
+          }
+        }
+        const dayList = [...byDay.values()].sort((a, b) =>
+          a.happenDay.localeCompare(b.happenDay)
+        );
+        return { ...prev, dayList };
+      });
+    };
+
+    const tick = async () => {
+      try {
+        const [status, record] = await Promise.all([
+          api.getRpeBackfillStatus(),
+          api.getRpeLoadByDay()
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setRpeBackfill(status);
+        mergeRpe(record);
+        if (status.pending > 0 || status.running) {
+          timer = setTimeout(tick, 3000);
+        }
+      } catch {
+        // Transient; stop polling quietly.
+      }
+    };
+
+    void api.startRpeBackfill();
+    void tick();
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+    // Re-run when the metrics window is (re)loaded or auth changes.
+  }, [api, trainingHubStatus?.authenticated, trainingHubDailyMetrics !== null]);
+
   function openMediaTab(tab: MediaTab) {
     setActiveView("media");
     setActiveMediaTab(tab);
@@ -1733,6 +1803,7 @@ export default function App() {
                 upcomingWorkouts={trainingHubUpcomingWorkouts}
                 snapshot={trainingHubSnapshot}
                 sportTypes={trainingHubSportTypes}
+                rpeBackfill={rpeBackfill}
                 activityDetail={trainingHubActivityDetail}
                 selectedActivity={selectedTrainingHubActivity}
                 busy={busy}

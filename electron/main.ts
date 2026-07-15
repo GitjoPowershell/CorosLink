@@ -33,9 +33,12 @@ import {
 } from "./activityBackupService";
 import { getAppInfo, openAppStorageLocation } from "./appInfoService";
 import {
+  backfillFeelTypes,
   getActivityPaceBaselines,
   getDailyMetrics,
   getRacePredictor,
+  getRpeBackfillStatus,
+  getRpeLoadByDay,
   getSportTypeMap,
   getTrainingAnalytics,
   getTrainingDashboard,
@@ -1256,6 +1259,14 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle("trainingHub:getRacePredictor", () => getRacePredictor());
+
+  ipcMain.handle("trainingHub:startRpeBackfill", () => {
+    void backfillFeelTypes();
+  });
+  ipcMain.handle("trainingHub:getRpeBackfillStatus", () =>
+    getRpeBackfillStatus()
+  );
+  ipcMain.handle("trainingHub:getRpeLoadByDay", () => getRpeLoadByDay());
 
   ipcMain.handle("trainingHub:getDashboard", () => getTrainingDashboard());
 
