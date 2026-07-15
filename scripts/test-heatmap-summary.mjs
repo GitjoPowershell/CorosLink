@@ -19,6 +19,9 @@ function cells(loads) {
     return {
       happenDay: date.toISOString().slice(0, 10).replace(/-/g, ""),
       trainingLoad: load,
+      // value mirrors the selected metric (buildHeatmapCells always sets it);
+      // the summary reads it so TL and RPE modes share one code path.
+      value: load,
       level: load && load > 0 ? 2 : 0,
       label: "day"
     };

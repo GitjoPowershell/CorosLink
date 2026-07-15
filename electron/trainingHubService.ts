@@ -8,12 +8,17 @@ import {
   mergeSportTypeEntries
 } from "./corosSportTypes";
 import {
+  countTrainingActivitiesMissingFeelType,
   deleteSettings,
   getSetting,
   listStoredTrainingActivities,
+  listTrainingActivitiesMissingFeelType,
+  listTrainingActivityRpeInputs,
   setSetting,
+  setTrainingActivityFeelType,
   upsertTrainingActivities
 } from "./database";
+import { dailyRpeLoad } from "./rpeLoad";
 import type {
   ActivityPaceBaseline,
   ActivityPaceBaselines,
@@ -463,6 +468,8 @@ export async function getTrainingHubActivityDetail(
   );
 
   let detail = parseActivityDetail(raw);
+  // Opportunistically cache the end-of-activity feeling while we have the detail.
+  cacheFeelTypeFromDetail(activityId, raw);
   if (listActivity) {
     detail = mergeActivityDetailWithList(detail, listActivity);
   }
@@ -577,6 +584,143 @@ export async function getRacePredictor(): Promise<TrainingHubRacePredictor> {
   return dashboard.racePredictor;
 }
 
+// Pull sportFeelInfo.feelType out of a raw /activity/detail payload and cache
+// it (0 = the user left it unrated; 1..5 = a smiley). The raw payload comes
+// from a successful, envelope-validated response, so a missing/invalid
+// sportFeelInfo genuinely means "never rated" — persist 0 in that case too,
+// otherwise the row stays NULL and the backfill would refetch it forever.
+function cacheFeelTypeFromDetail(
+  activityId: string,
+  raw: Record<string, unknown>
+): void {
+  try {
+    const feelInfo = raw.sportFeelInfo as { feelType?: unknown } | undefined;
+    const feelType = toOptionalNumber(feelInfo?.feelType);
+    setTrainingActivityFeelType(
+      activityId,
+      feelType !== undefined && Number.isInteger(feelType) ? feelType : 0
+    );
+  } catch {
+    // best-effort cache; never block the detail request on it.
+  }
+}
+
+const HEATMAP_WINDOW_DAYS = 365;
+// Query pending activities in chunks so the DB read stays small; the whole
+// window is still drained in one background run.
+const FEEL_BACKFILL_CHUNK = 50;
+// Pause between detail fetches: each response is ~1 MB and a full window can
+// be hundreds of activities, so pace the drain instead of hammering COROS.
+const FEEL_BACKFILL_DELAY_MS = 400;
+// Abort the run when the API errors repeatedly (down / rate-limiting us) …
+const FEEL_BACKFILL_MAX_CONSECUTIVE_FAILURES = 5;
+// … and refuse to start another run for a while afterwards.
+const FEEL_BACKFILL_COOLDOWN_MS = 5 * 60 * 1000;
+let feelBackfillRunning = false;
+let feelBackfillCooldownUntil = 0;
+// Activities whose detail fetch failed this session: left NULL in the DB so a
+// future session retries them, but skipped for the rest of this one.
+const feelBackfillFailedIds = new Set<string>();
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function heatmapWindowStartEpochSeconds(): number {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - HEATMAP_WINDOW_DAYS);
+  return Math.floor(start.getTime() / 1000);
+}
+
+/** How much of the RPE backfill is left for the heatmap window. */
+export function getRpeBackfillStatus(): {
+  pending: number;
+  running: boolean;
+} {
+  const since = heatmapWindowStartEpochSeconds();
+  const missing = countTrainingActivitiesMissingFeelType(since);
+  // Failed fetches stay NULL in the DB (a future session retries them) but
+  // won't be refetched this session — report only what can still load now.
+  const pending = Math.max(0, missing - feelBackfillFailedIds.size);
+  return { pending, running: feelBackfillRunning };
+}
+
+/** Per-day Foster sRPE for the heatmap window, keyed by happenDay (YYYYMMDD). */
+export function getRpeLoadByDay(): Record<string, number> {
+  const since = heatmapWindowStartEpochSeconds();
+  const byDay = dailyRpeLoad(listTrainingActivityRpeInputs(since));
+  return Object.fromEntries(byDay);
+}
+
+// Fetch feelType for every activity in the heatmap window that was never
+// fetched, draining the queue in one background run paced by
+// FEEL_BACKFILL_DELAY_MS between requests. Fire-and-forget; guarded so only
+// one run happens at once. Transient failures leave the row NULL (retried in
+// a later session), and repeated failures abort the run and start a cooldown
+// so a struggling API isn't hammered.
+export async function backfillFeelTypes(): Promise<void> {
+  if (feelBackfillRunning || Date.now() < feelBackfillCooldownUntil) {
+    return;
+  }
+  if (!getStoredAuth()) {
+    return;
+  }
+  feelBackfillRunning = true;
+  try {
+    const since = heatmapWindowStartEpochSeconds();
+    const userId = getStoredAuth()?.userId;
+    // Every activity touched this run, success or failure — filtered out of
+    // each re-query so a row that stays NULL can't wedge the loop.
+    const attempted = new Set<string>();
+    let consecutiveFailures = 0;
+    // Re-query each chunk: rows drop out of "missing" as we cache them. The
+    // limit grows with the skip sets so unattempted rows stay reachable.
+    for (;;) {
+      const pending = listTrainingActivitiesMissingFeelType(
+        since,
+        FEEL_BACKFILL_CHUNK + attempted.size + feelBackfillFailedIds.size
+      ).filter(
+        ({ activityId }) =>
+          !attempted.has(activityId) && !feelBackfillFailedIds.has(activityId)
+      );
+      if (pending.length === 0) {
+        break;
+      }
+      for (const { activityId, sportType } of pending) {
+        attempted.add(activityId);
+        try {
+          const raw = await trainingHubRequest<Record<string, unknown>>(
+            "/activity/detail/query",
+            {
+              method: "POST",
+              params: {
+                labelId: activityId,
+                sportType,
+                ...(userId ? { userId } : {})
+              }
+            }
+          );
+          cacheFeelTypeFromDetail(activityId, raw);
+          consecutiveFailures = 0;
+        } catch {
+          // Leave the row NULL so the fetch is retried in a future session;
+          // skip it for the rest of this one.
+          feelBackfillFailedIds.add(activityId);
+          consecutiveFailures += 1;
+          if (consecutiveFailures >= FEEL_BACKFILL_MAX_CONSECUTIVE_FAILURES) {
+            feelBackfillCooldownUntil = Date.now() + FEEL_BACKFILL_COOLDOWN_MS;
+            return;
+          }
+        }
+        await delay(FEEL_BACKFILL_DELAY_MS);
+      }
+    }
+  } finally {
+    feelBackfillRunning = false;
+  }
+}
+
 export async function getDailyMetrics(
   dateList: string[]
 ): Promise<TrainingHubDailyMetrics> {
@@ -596,7 +740,36 @@ export async function getDailyMetrics(
     }
   );
 
-  return parseDailyMetrics(raw);
+  const metrics = parseDailyMetrics(raw);
+
+  // Attach per-day Foster sRPE from cached feelType, then top up the cache in
+  // the background so coverage improves on the next load.
+  try {
+    const since = heatmapWindowStartEpochSeconds();
+    const rpeByDay = dailyRpeLoad(listTrainingActivityRpeInputs(since));
+    const dayByKey = new Map(
+      metrics.dayList.map((day) => [day.happenDay, day])
+    );
+    for (const [happenDay, load] of rpeByDay) {
+      if (load <= 0) {
+        continue;
+      }
+      const existing = dayByKey.get(happenDay);
+      if (existing) {
+        existing.rpeLoad = load;
+      } else {
+        // A rated day COROS returned no daily metric for still needs to show.
+        const day = { happenDay, rpeLoad: load };
+        dayByKey.set(happenDay, day);
+        metrics.dayList.push(day);
+      }
+    }
+  } catch {
+    // RPE is additive; never fail daily metrics if the cache read throws.
+  }
+  void backfillFeelTypes();
+
+  return metrics;
 }
 
 export async function getSportTypeMap(): Promise<TrainingHubSportType[]> {

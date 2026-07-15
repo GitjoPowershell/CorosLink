@@ -1322,6 +1322,8 @@ export interface TrainingHubActivity {
 export interface TrainingHubDailyMetric {
   happenDay: string;
   trainingLoad?: number;
+  /** Foster session-RPE load (AU) for the day, from cached activity feelType. */
+  rpeLoad?: number;
   rhr?: number;
   avgSleepHrv?: number;
   sleepHrvBase?: number;
@@ -1903,6 +1905,7 @@ export interface TrainingTrendPoint {
   date: string;
   label: string;
   trainingLoad?: number;
+  rpeLoad?: number;
   avgSleepHrv?: number;
   sleepHrvBase?: number;
   rhr?: number;

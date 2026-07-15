@@ -326,6 +326,9 @@ export interface CorosLinkApi {
   getRacePredictor: () => Promise<TrainingHubRacePredictor>;
   getTrainingDashboard: () => Promise<TrainingHubDashboard>;
   getDailyMetrics: (dateList: string[]) => Promise<TrainingHubDailyMetrics>;
+  startRpeBackfill: () => Promise<void>;
+  getRpeBackfillStatus: () => Promise<{ pending: number; running: boolean }>;
+  getRpeLoadByDay: () => Promise<Record<string, number>>;
   getSportTypeMap: () => Promise<TrainingHubSportType[]>;
   getActivityPaceBaselines: () => Promise<ActivityPaceBaselines>;
   getUpcomingWorkouts: (days?: number) => Promise<TrainingHubUpcomingWorkout[]>;
