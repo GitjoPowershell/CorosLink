@@ -45,6 +45,9 @@ export async function disconnectCorosMcp(): Promise<CorosMcpStatus> {
 }
 
 export async function listCorosMcpTools(): Promise<CorosMcpTool[]> {
+  if (!getMcpServerStatus(COROS)?.connected) {
+    throw new Error("COROS MCP is not connected.");
+  }
   return getMcpServerTools(COROS);
 }
 

@@ -4,7 +4,6 @@ import type {
   ChatAuthStatus,
   ChatSettings,
   ClaudeCodeStatus,
-  CorosMcpStatus,
   LocalChatConnectionTest,
   LocalChatDiscovery
 } from "../../electron/types";
@@ -27,9 +26,7 @@ export function ChatSettingsModal({
   checkingClaude,
   connectingClaude,
   testingClaude,
-  mcpStatus,
-  mcpBusy,
-  showTools,
+  mcpRefreshVersion,
   busy,
   onClose,
   onSignIn,
@@ -45,9 +42,7 @@ export function ChatSettingsModal({
   onTestLocalConnection,
   onSaveLocalSettings,
   onClearLocalApiKey,
-  onConnectMcp,
-  onDisconnectMcp,
-  onToggleTools,
+  onMcpServersChange,
   onUpdateChatSettings
 }: {
   api: CorosLinkApi | undefined;
@@ -65,9 +60,7 @@ export function ChatSettingsModal({
   checkingClaude: boolean;
   connectingClaude: boolean;
   testingClaude: boolean;
-  mcpStatus: CorosMcpStatus | null;
-  mcpBusy: boolean;
-  showTools: boolean;
+  mcpRefreshVersion: number;
   busy?: boolean;
   onClose: () => void;
   onSignIn: () => void;
@@ -85,9 +78,7 @@ export function ChatSettingsModal({
   onTestLocalConnection: () => void;
   onSaveLocalSettings: () => void;
   onClearLocalApiKey: () => void;
-  onConnectMcp: () => void;
-  onDisconnectMcp: () => void;
-  onToggleTools: () => void;
+  onMcpServersChange: () => void | Promise<void>;
   onUpdateChatSettings: (patch: Partial<ChatSettings>) => void;
 }) {
   useEffect(() => {
@@ -151,9 +142,7 @@ export function ChatSettingsModal({
             checkingClaude={checkingClaude}
             connectingClaude={connectingClaude}
             testingClaude={testingClaude}
-            mcpStatus={mcpStatus}
-            mcpBusy={mcpBusy}
-            showTools={showTools}
+            mcpRefreshVersion={mcpRefreshVersion}
             busy={busy}
             onSignIn={onSignIn}
             onSignOut={onSignOut}
@@ -168,9 +157,7 @@ export function ChatSettingsModal({
             onTestLocalConnection={onTestLocalConnection}
             onSaveLocalSettings={onSaveLocalSettings}
             onClearLocalApiKey={onClearLocalApiKey}
-            onConnectMcp={onConnectMcp}
-            onDisconnectMcp={onDisconnectMcp}
-            onToggleTools={onToggleTools}
+            onMcpServersChange={onMcpServersChange}
             onUpdateChatSettings={onUpdateChatSettings}
           />
         </div>

@@ -258,6 +258,7 @@ import {
 } from "./mcpClientManager";
 import {
   addMcpServer,
+  getMcpServer,
   listMcpServers,
   removeMcpServer,
   setMcpBearer,
@@ -1101,22 +1102,49 @@ function registerIpcHandlers(): void {
   // Generic MCP server registry.
   ipcMain.handle("mcp:listServers", () => listMcpServers());
   ipcMain.handle("mcp:addServer", (_event, input) => addMcpServer(input));
-  ipcMain.handle("mcp:updateServer", (_event, id: string, patch) =>
-    updateMcpServer(id, patch)
-  );
-  ipcMain.handle("mcp:removeServer", (_event, id: string) =>
-    removeMcpServer(id)
-  );
+  ipcMain.handle("mcp:updateServer", async (_event, id: string, patch) => {
+    const existing = getMcpServer(id);
+    if (!existing) {
+      throw new Error(`Unknown MCP server "${id}".`);
+    }
+    const updated = updateMcpServer(id, patch);
+    const connectionChanged =
+      updated.url !== existing.url ||
+      updated.transport !== existing.transport ||
+      updated.authType !== existing.authType ||
+      updated.scope !== existing.scope;
+    if (!updated.enabled || connectionChanged) {
+      await disconnectMcpServer(id, {
+        clearAuthorization: connectionChanged
+      });
+    }
+    return updated;
+  });
+  ipcMain.handle("mcp:removeServer", async (_event, id: string) => {
+    const existing = getMcpServer(id);
+    if (!existing) return;
+    if (existing.builtin) {
+      removeMcpServer(id);
+      return;
+    }
+    await disconnectMcpServer(id);
+    removeMcpServer(id);
+  });
   ipcMain.handle("mcp:connect", (_event, id: string) =>
     connectMcpServer(id, true, mainWindow)
   );
-  ipcMain.handle("mcp:disconnect", (_event, id: string) =>
-    disconnectMcpServer(id)
-  );
+  ipcMain.handle("mcp:disconnect", async (_event, id: string) => {
+    const server = getMcpServer(id);
+    await disconnectMcpServer(id);
+    if (server?.authType === "none") {
+      updateMcpServer(id, { enabled: false });
+    }
+  });
   ipcMain.handle("mcp:statuses", () => getMcpStatuses());
-  ipcMain.handle("mcp:setBearer", (_event, id: string, token: string) =>
-    setMcpBearer(id, token)
-  );
+  ipcMain.handle("mcp:setBearer", async (_event, id: string, token: string) => {
+    setMcpBearer(id, token);
+    await disconnectMcpServer(id, { clearAuthorization: false });
+  });
 
   ipcMain.handle("chat:uploadPlanDraft", (_event, draftId: string) =>
     uploadTrainingPlanDraft(draftId)

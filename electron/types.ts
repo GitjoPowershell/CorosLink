@@ -1821,7 +1821,7 @@ export interface CorosMcpStatus {
 
 // ----- Configurable MCP server registry -----
 
-export type McpTransport = "streamable-http" | "sse";
+export type McpTransport = "streamable-http";
 export type McpAuthType = "oauth" | "bearer" | "none";
 
 export interface McpServerConfig {
@@ -1843,7 +1843,7 @@ export interface McpServerInput {
   url: string;
   transport?: McpTransport;
   authType?: McpAuthType;
-  scope?: string;
+  scope?: string | null;
   enabled?: boolean;
 }
 

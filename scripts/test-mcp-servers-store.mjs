@@ -97,13 +97,64 @@ assert.throws(() =>
 // invalid id rejected
 assert.throws(() => addMcpServer({ id: "BAD_ID", name: "x", url: "https://x/mcp" }, db));
 
+// runtime IPC input is validated, not just TypeScript callers
+assert.throws(() =>
+  addMcpServer({ id: "bad-url", name: "Bad URL", url: "file:///tmp/mcp" }, db)
+);
+assert.throws(() =>
+  addMcpServer({
+    id: "bad-transport",
+    name: "Bad transport",
+    url: "https://x.example/mcp",
+    transport: "sse"
+  }, db)
+);
+assert.throws(() =>
+  addMcpServer({
+    id: "bad-auth",
+    name: "Bad auth",
+    url: "https://x.example/mcp",
+    authType: "magic"
+  }, db)
+);
+assert.throws(() =>
+  addMcpServer({
+    id: "bad-enabled",
+    name: "Bad enabled",
+    url: "https://x.example/mcp",
+    enabled: "false"
+  }, db)
+);
+assert.throws(() =>
+  addMcpServer({
+    id: 123,
+    name: "Bad id type",
+    url: "https://x.example/mcp"
+  }, db)
+);
+
 // built-in url immutable, enabled mutable
 assert.throws(() => updateMcpServer("coros", { url: "https://evil/mcp" }, db));
 const corosOff = updateMcpServer("coros", { enabled: false }, db);
 assert.equal(corosOff.enabled, false);
 
-// built-in not removable; custom removable (deleteSettings is a no-op here —
-// removeMcpServer only reaches it after the built-in guard, and freddy isn't built-in)
+// scope can be explicitly cleared and ids cannot be changed
+assert.equal(updateMcpServer("freddy", { scope: "read write" }, db).scope, "read write");
+assert.equal(updateMcpServer("freddy", { scope: null }, db).scope, undefined);
+assert.throws(() => updateMcpServer("freddy", { id: "renamed" }, db));
+
+// built-in not removable; custom removal deletes its stored secrets
 assert.throws(() => removeMcpServer("coros", db));
+let removedKeys = [];
+removeMcpServer("freddy", db, (keys) => {
+  removedKeys = keys;
+});
+assert.equal(getMcpServer("freddy", db), undefined);
+assert.deepEqual(removedKeys, [
+  "mcp.freddy.tokens",
+  "mcp.freddy.clientInfo",
+  "mcp.freddy.bearer",
+  "mcp.freddy.resourceUrl"
+]);
 
 console.log("mcp-servers-store tests passed");

@@ -18,7 +18,8 @@ import {
   getMcpBearer,
   getMcpServer,
   listMcpServers,
-  mcpSecretKey
+  mcpSecretKey,
+  updateMcpServer
 } from "./mcpServersStore";
 import { prefixToolName, splitToolName } from "./mcpToolNames";
 import type {
@@ -67,7 +68,9 @@ function loopbackPortFor(id: string): number {
 }
 
 function redirectPathFor(id: string): string {
-  return `/mcp/${id}/callback`;
+  // Preserve the legacy COROS redirect URI because existing dynamic client
+  // registrations are bound to this exact path.
+  return id === "coros" ? "/coros-mcp/callback" : `/mcp/${id}/callback`;
 }
 
 // ----- token persistence (encrypted, per server) -----
@@ -93,6 +96,49 @@ function writeTokens(id: string, tokens: OAuthTokens): void {
 
 function hasStoredTokens(id: string): boolean {
   return Boolean(getSetting(keysFor(id).tokens));
+}
+
+function readClientInformation(id: string): OAuthClientInformationFull | undefined {
+  const key = keysFor(id).clientInfo;
+  const raw = getSetting(key);
+  if (!raw) return undefined;
+  try {
+    if (raw.startsWith("encrypted:")) {
+      if (!safeStorage.isEncryptionAvailable()) return undefined;
+      const json = safeStorage.decryptString(
+        Buffer.from(raw.slice("encrypted:".length), "base64")
+      );
+      return JSON.parse(json) as OAuthClientInformationFull;
+    }
+
+    // Migrate legacy plaintext COROS registrations on first read.
+    const parsed = JSON.parse(raw) as OAuthClientInformationFull;
+    if (safeStorage.isEncryptionAvailable()) {
+      writeClientInformation(id, parsed);
+    }
+    return parsed;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeClientInformation(
+  id: string,
+  info: OAuthClientInformationFull
+): void {
+  if (!safeStorage.isEncryptionAvailable()) {
+    if (info.client_secret) {
+      throw new Error(
+        "Secure credential storage is required for this OAuth server."
+      );
+    }
+    setSetting(keysFor(id).clientInfo, JSON.stringify(info));
+    return;
+  }
+  const encrypted = safeStorage
+    .encryptString(JSON.stringify(info))
+    .toString("base64");
+  setSetting(keysFor(id).clientInfo, `encrypted:${encrypted}`);
 }
 
 // ----- OAuth client provider (per server) -----
@@ -150,17 +196,11 @@ class McpOAuthProvider implements OAuthClientProvider {
   }
 
   clientInformation(): OAuthClientInformationFull | undefined {
-    const raw = getSetting(keysFor(this.config.serverId).clientInfo);
-    if (!raw) return undefined;
-    try {
-      return JSON.parse(raw) as OAuthClientInformationFull;
-    } catch {
-      return undefined;
-    }
+    return readClientInformation(this.config.serverId);
   }
 
   saveClientInformation(info: OAuthClientInformationFull): void {
-    setSetting(keysFor(this.config.serverId).clientInfo, JSON.stringify(info));
+    writeClientInformation(this.config.serverId, info);
   }
 
   tokens(): OAuthTokens | undefined {
@@ -181,6 +221,11 @@ class McpOAuthProvider implements OAuthClientProvider {
 
   redirectToAuthorization(authorizationUrl: URL): void {
     if (!this.interactive) return;
+    if (!isWebUrl(authorizationUrl.toString())) {
+      throw new Error(
+        `${this.config.serverName} returned an unsafe authorization URL.`
+      );
+    }
     this.startLoopback(authorizationUrl);
   }
 
@@ -257,7 +302,9 @@ class McpOAuthProvider implements OAuthClientProvider {
       });
     });
     this.authWindow.webContents.setWindowOpenHandler(({ url }) => {
-      void shell.openExternal(url);
+      if (isWebUrl(url)) {
+        void shell.openExternal(url);
+      }
       return { action: "deny" };
     });
     this.authWindow.webContents.on("dom-ready", () => {
@@ -364,10 +411,12 @@ class McpOAuthProvider implements OAuthClientProvider {
 
 function mcpResultPage(name: string, message: string, failed: boolean): string {
   const tone = failed ? "#b42318" : "#027a48";
+  const safeName = escapeHtml(name);
+  const safeMessage = escapeHtml(message);
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Connect ${name}</title>
+<title>Connect ${safeName}</title>
 <style>
   :root { color-scheme: light dark; } * { box-sizing: border-box; }
   body { margin:0; min-height:100vh; display:grid; place-items:center;
@@ -386,7 +435,7 @@ function mcpResultPage(name: string, message: string, failed: boolean): string {
 </style></head>
 <body><div class="card">
   <button class="close" type="button" aria-label="Close" title="Close" onclick="window.close()">×</button>
-  <h1>${message}</h1><p>You can close this window.</p>
+  <h1>${safeMessage}</h1><p>You can close this window.</p>
   <button class="action" type="button" onclick="window.close()">Close</button>
 </div></body></html>`;
 }
@@ -398,15 +447,27 @@ interface ServerRuntime {
   tools: CorosMcpTool[];
   connectInFlight: Promise<void> | null;
   connectInFlightInteractive: boolean;
+  generation: number;
+  credentialsInvalidatedAtGeneration: number;
+  silentRetryAfter: number;
   lastError?: string;
 }
 
 const runtimes = new Map<string, ServerRuntime>();
+const SILENT_RETRY_COOLDOWN_MS = 30_000;
 
 function runtime(id: string): ServerRuntime {
   let rt = runtimes.get(id);
   if (!rt) {
-    rt = { client: null, tools: [], connectInFlight: null, connectInFlightInteractive: false };
+    rt = {
+      client: null,
+      tools: [],
+      connectInFlight: null,
+      connectInFlightInteractive: false,
+      generation: 0,
+      credentialsInvalidatedAtGeneration: 0,
+      silentRetryAfter: 0
+    };
     runtimes.set(id, rt);
   }
   return rt;
@@ -433,18 +494,72 @@ function clearStoredAuth(id: string): void {
   deleteSettings([keys.tokens, keys.clientInfo]);
 }
 
-async function refreshTools(server: McpServerConfig): Promise<void> {
-  const rt = runtime(server.id);
-  if (!rt.client) return;
-  const result = await rt.client.listTools();
-  rt.tools = (result.tools ?? []).map((tool) => ({
+function clearStoredCredentials(id: string): void {
+  const keys = keysFor(id);
+  deleteSettings([
+    keys.tokens,
+    keys.clientInfo,
+    keys.resourceUrl,
+    mcpSecretKey(id, "bearer")
+  ]);
+}
+
+function ensureCurrentResource(server: McpServerConfig): void {
+  const keys = keysFor(server.id);
+  const storedResource = getSetting(keys.resourceUrl);
+  if (
+    !storedResource ||
+    canonicalHttpUrl(storedResource) === canonicalHttpUrl(server.url)
+  ) {
+    return;
+  }
+  clearStoredCredentials(server.id);
+}
+
+async function discoverTools(client: Client): Promise<CorosMcpTool[]> {
+  const result = await client.listTools();
+  return (result.tools ?? []).map((tool) => ({
     name: tool.name,
     description: tool.description,
     inputSchema: tool.inputSchema as Record<string, unknown>
   }));
 }
 
+async function refreshTools(server: McpServerConfig): Promise<void> {
+  const rt = runtime(server.id);
+  if (!rt.client) return;
+  rt.tools = await discoverTools(rt.client);
+}
+
+async function activateClient(
+  server: McpServerConfig,
+  client: Client,
+  generation: number
+): Promise<void> {
+  const rt = runtime(server.id);
+  try {
+    const tools = await discoverTools(client);
+    if (rt.generation !== generation) {
+      if (rt.credentialsInvalidatedAtGeneration > generation) {
+        clearStoredCredentials(server.id);
+      }
+      throw new Error(`${server.name} connection was cancelled.`);
+    }
+    rt.client = client;
+    rt.tools = tools;
+    attachClientCloseHandler(server.id, client);
+  } catch (error) {
+    await client.close().catch(() => undefined);
+    throw error;
+  }
+}
+
 function buildTransport(server: McpServerConfig, authProvider?: McpOAuthProvider) {
+  if (server.transport !== "streamable-http") {
+    throw new Error(
+      `${server.name} uses unsupported MCP transport "${server.transport}".`
+    );
+  }
   if (server.authType === "oauth" && authProvider) {
     return new StreamableHTTPClientTransport(new URL(server.url), { authProvider });
   }
@@ -464,7 +579,8 @@ function buildTransport(server: McpServerConfig, authProvider?: McpOAuthProvider
 async function connectOnce(
   server: McpServerConfig,
   parentWindow: BrowserWindow | null,
-  interactive: boolean
+  interactive: boolean,
+  generation: number
 ): Promise<void> {
   const rt = runtime(server.id);
   if (rt.client) return;
@@ -476,8 +592,7 @@ async function connectOnce(
       { capabilities: {} }
     );
     await mcpClient.connect(transport);
-    rt.client = mcpClient;
-    await refreshTools(server);
+    await activateClient(server, mcpClient, generation);
     return;
   }
 
@@ -522,9 +637,8 @@ async function connectOnce(
       await authProvider.cleanup();
     }
 
-    rt.client = mcpClient;
+    await activateClient(server, mcpClient, generation);
     setSetting(keysFor(server.id).resourceUrl, server.url);
-    await refreshTools(server);
     return;
   }
 
@@ -537,8 +651,15 @@ export async function connectMcpServer(
   interactive = true,
   parentWindow: BrowserWindow | null = null
 ): Promise<McpServerStatus> {
-  const server = getMcpServer(id);
+  let server = getMcpServer(id);
   if (!server) throw new Error(`Unknown MCP server "${id}".`);
+  if (!server.enabled) {
+    if (!interactive) {
+      throw new Error(`${server.name} MCP server is disabled.`);
+    }
+    server = updateMcpServer(id, { enabled: true });
+  }
+  ensureCurrentResource(server);
   const rt = runtime(id);
 
   for (;;) {
@@ -546,11 +667,7 @@ export async function connectMcpServer(
 
     if (rt.connectInFlight) {
       if (!interactive || rt.connectInFlightInteractive) {
-        try {
-          await rt.connectInFlight;
-        } catch {
-          // fall through to report status/error
-        }
+        await rt.connectInFlight;
         return statusFor(server);
       }
       try {
@@ -563,9 +680,18 @@ export async function connectMcpServer(
 
     rt.connectInFlightInteractive = interactive;
     rt.lastError = undefined;
-    const flight = connectOnce(server, parentWindow, interactive)
+    const generation = rt.generation;
+    const flight = connectOnce(server, parentWindow, interactive, generation)
+      .then(() => {
+        rt.silentRetryAfter = 0;
+      })
       .catch((error) => {
-        rt.lastError = error instanceof Error ? error.message : String(error);
+        if (rt.generation === generation) {
+          rt.lastError = error instanceof Error ? error.message : String(error);
+          if (!interactive) {
+            rt.silentRetryAfter = Date.now() + SILENT_RETRY_COOLDOWN_MS;
+          }
+        }
         throw error;
       })
       .finally(() => {
@@ -575,17 +701,20 @@ export async function connectMcpServer(
         }
       });
     rt.connectInFlight = flight;
-    try {
-      await flight;
-    } catch {
-      // status reflects lastError
-    }
+    await flight;
     return statusFor(server);
   }
 }
 
-export async function disconnectMcpServer(id: string): Promise<void> {
+export async function disconnectMcpServer(
+  id: string,
+  options: { clearAuthorization?: boolean } = {}
+): Promise<void> {
   const rt = runtime(id);
+  rt.generation += 1;
+  if (options.clearAuthorization !== false) {
+    rt.credentialsInvalidatedAtGeneration = rt.generation;
+  }
   if (rt.client) {
     try {
       await rt.client.close();
@@ -595,14 +724,19 @@ export async function disconnectMcpServer(id: string): Promise<void> {
   }
   rt.client = null;
   rt.tools = [];
-  const keys = keysFor(id);
-  deleteSettings([keys.tokens, keys.clientInfo]);
+  rt.lastError = undefined;
+  rt.silentRetryAfter = 0;
+  if (options.clearAuthorization !== false) {
+    clearStoredCredentials(id);
+  }
 }
 
 /** Silent reconnect using stored auth (no browser). Non-fatal. */
 async function ensureMcpConnected(server: McpServerConfig): Promise<void> {
   const rt = runtime(server.id);
+  if (!server.enabled) return;
   if (rt.client) return;
+  if (Date.now() < rt.silentRetryAfter) return;
   if (server.authType === "oauth" && !hasStoredTokens(server.id)) return;
   if (server.authType === "bearer" && !getMcpBearer(server.id)) return;
   try {
@@ -626,8 +760,13 @@ export async function ensureAllMcpConnected(): Promise<void> {
 /** All tools from connected servers, names prefixed "<id>__<tool>". */
 export function getAllMcpTools(): CorosMcpTool[] {
   const tools: CorosMcpTool[] = [];
+  const enabledIds = new Set(
+    listMcpServers()
+      .filter((server) => server.enabled)
+      .map((server) => server.id)
+  );
   for (const [id, rt] of runtimes) {
-    if (!rt.client) continue;
+    if (!enabledIds.has(id) || !rt.client) continue;
     for (const tool of rt.tools) {
       tools.push({ ...tool, name: prefixToolName(id, tool.name) });
     }
@@ -637,29 +776,22 @@ export function getAllMcpTools(): CorosMcpTool[] {
 
 /** Cached unprefixed tools for one server (sync; empty if not connected). */
 export function getMcpServerCachedTools(id: string): CorosMcpTool[] {
-  return runtime(id).tools;
+  const server = getMcpServer(id);
+  return server?.enabled ? runtime(id).tools : [];
 }
 
 /** Silent reconnect of one server using stored auth. Returns connected state. */
 export async function ensureMcpServerConnected(id: string): Promise<boolean> {
   const server = getMcpServer(id);
-  if (!server) return false;
-  const rt = runtime(id);
-  if (rt.client) return true;
-  if (server.authType === "oauth" && !hasStoredTokens(id)) return false;
-  if (server.authType === "bearer" && !getMcpBearer(id)) return false;
-  try {
-    await connectMcpServer(id, false, null);
-  } catch {
-    // non-fatal
-  }
+  if (!server || !server.enabled) return false;
+  await ensureMcpConnected(server);
   return runtime(id).client !== null;
 }
 
 /** Unprefixed tools for one server (for the settings UI). */
 export async function getMcpServerTools(id: string): Promise<CorosMcpTool[]> {
   const server = getMcpServer(id);
-  if (!server) return [];
+  if (!server || !server.enabled) return [];
   const rt = runtime(id);
   if (rt.client) await refreshTools(server);
   return rt.tools;
@@ -675,7 +807,10 @@ export async function callMcpTool(
   }
   const rt = runtime(split.serverId);
   const server = getMcpServer(split.serverId);
-  const serverName = server?.name ?? split.serverId;
+  if (!server || !server.enabled) {
+    throw new Error(`MCP server "${split.serverId}" is unavailable or disabled.`);
+  }
+  const serverName = server.name;
   if (!rt.client) {
     throw new Error(
       `${serverName} MCP is not connected. Connect it in Settings → MCP Servers.`
@@ -760,9 +895,9 @@ function statusFor(server: McpServerConfig): McpServerStatus {
     id: server.id,
     name: server.name,
     enabled: server.enabled,
-    connected: rt.client !== null,
+    connected: server.enabled && rt.client !== null,
     authenticated,
-    toolCount: rt.tools.length,
+    toolCount: server.enabled && rt.client ? rt.tools.length : 0,
     error: rt.lastError
   };
 }
@@ -784,4 +919,40 @@ function base64Url(input: Buffer): string {
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
+}
+
+function attachClientCloseHandler(id: string, client: Client): void {
+  client.onclose = () => {
+    const rt = runtime(id);
+    if (rt.client !== client) return;
+    rt.client = null;
+    rt.tools = [];
+  };
+}
+
+function isWebUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function canonicalHttpUrl(value: string): string {
+  try {
+    return new URL(value).toString();
+  } catch {
+    return value;
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    if (character === "&") return "&amp;";
+    if (character === "<") return "&lt;";
+    if (character === ">") return "&gt;";
+    if (character === '"') return "&quot;";
+    return "&#39;";
+  });
 }
