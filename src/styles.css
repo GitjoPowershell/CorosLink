@@ -12657,8 +12657,46 @@ td span {
     rgba(255, 255, 255, 0.034);
 }
 
+.training-load-profile {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.training-load-profile-header .eyebrow {
+  margin: 0;
+}
+
+.training-load-profile-header h2 {
+  margin: 2px 0 0;
+  font-size: 1.15rem;
+}
+
+.training-load-profile-header h2 span {
+  opacity: 0.6;
+  font-weight: 500;
+}
+
 .training-zone-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) {
+  .training-zone-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .training-zone-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.training-zone-coverage {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  opacity: 0.7;
 }
 
 .training-zone-header {
