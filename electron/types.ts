@@ -1319,6 +1319,28 @@ export interface TrainingHubActivity {
   elevationGain?: number;
 }
 
+export interface RpeDistributionBucket {
+  /** RPE level 1..5. */
+  level: number;
+  /** Number of rated sessions at this level. */
+  frequency: number;
+  /** Sum of session sRPE (Foster CR10 × duration minutes) at this level. */
+  srpe: number;
+  /** Sum of duration seconds at this level. */
+  timeSeconds: number;
+}
+
+export interface RpeDistribution {
+  /** Exactly 5 buckets, level 1..5, always present (zeros allowed). */
+  buckets: RpeDistributionBucket[];
+  coverage: {
+    /** Activities with feel_type in 1..5 within the window. */
+    rated: number;
+    /** All activities within the window (rated + unrated). */
+    total: number;
+  };
+}
+
 export interface TrainingHubDailyMetric {
   happenDay: string;
   trainingLoad?: number;
